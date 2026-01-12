@@ -89,6 +89,7 @@ export interface DataContextType {
 
     // Tasks
     addTask: (userId: string, text: string) => void;
+    toggleTaskCompletion: (taskId: string, isCompleted: boolean) => void; // NEW
     deleteTask: (taskId: string) => void;
     archiveCompletedTasks: (userId: string) => void;
 
@@ -274,52 +275,60 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return () => clearInterval(interval);
     }, []);
 
-    // --- SYNC WITH BACKEND ---
+    // --- SYNC WITH BACKEND (OPTIMIZED: PARALLEL FETCHING) ---
     const fetchUserData = useCallback(async (userId: string) => {
         try {
             console.log("Fetching user data for:", userId);
-            // 1. Tải Notes
-            const notesRes = await fetch(`${BACKEND_URL}/notes/${userId}`);
-            const notes: PersonalNote[] = await notesRes.json();
+            
+            // Execute all fetches in parallel
+            const [notesRes, tasksRes, chatRes, groupsRes, groupChatRes, pathsRes] = await Promise.all([
+                fetch(`${BACKEND_URL}/notes/${userId}`),
+                fetch(`${BACKEND_URL}/tasks/${userId}`),
+                fetch(`${BACKEND_URL}/chat/history/${userId}`),
+                fetch(`${BACKEND_URL}/groups`),
+                fetch(`${BACKEND_URL}/group-chat/all`),
+                fetch(`${BACKEND_URL}/paths/${userId}`)
+            ]);
+
+            const [notes, tasks, chatMessages, groups, groupMessages, paths] = await Promise.all([
+                notesRes.json(),
+                tasksRes.json(),
+                chatRes.json(),
+                groupsRes.json(),
+                groupChatRes.json(),
+                pathsRes.json()
+            ]);
+
+            // Process Notes
             const notesMap: Record<string, PersonalNote> = {};
-            notes.forEach(n => { notesMap[n._id || n.id] = { ...n, id: n._id || n.id }; });
+            (notes as any[]).forEach(n => { notesMap[n._id || n.id] = { ...n, id: n._id || n.id }; });
 
-            // 2. Tải Tasks
-            const tasksRes = await fetch(`${BACKEND_URL}/tasks/${userId}`);
-            const tasks: Task[] = await tasksRes.json();
+            // Process Tasks
             const tasksMap: Record<string, Task> = {};
-            tasks.forEach(t => { tasksMap[t._id || t.id] = { ...t, id: t._id || t.id }; });
+            (tasks as any[]).forEach(t => { tasksMap[t._id || t.id] = { ...t, id: t._id || t.id }; });
 
-            // 3. Tải Lịch sử Chat (1-1)
-            const chatRes = await fetch(`${BACKEND_URL}/chat/history/${userId}`);
-            const chatMessages: ChatMessage[] = await chatRes.json();
+            // Process Chat
             const chatMap: Record<string, ChatMessage[]> = {};
-            chatMessages.forEach(msg => {
+            (chatMessages as ChatMessage[]).forEach(msg => {
                 const key = [msg.from, msg.to || ''].sort().join('_');
                 if (!chatMap[key]) chatMap[key] = [];
                 const formattedMsg = { ...msg, id: (msg as any)._id || msg.id };
                 chatMap[key].push(formattedMsg);
             });
 
-            // 4. Fetch Groups
-            const groupsRes = await fetch(`${BACKEND_URL}/groups`);
-            const groups: StudyGroup[] = await groupsRes.json();
-            const formattedGroups = groups.map((g: any) => ({ ...g, id: g.id || g._id }));
+            // Process Groups
+            const formattedGroups = (groups as any[]).map((g: any) => ({ ...g, id: g.id || g._id }));
 
-            // 5. Fetch Group Messages
-            const groupChatRes = await fetch(`${BACKEND_URL}/group-chat/all`); 
-            const groupMessages: any[] = await groupChatRes.json();
+            // Process Group Messages
             const groupChatMap: Record<string, GroupChatMessage[]> = {};
-            groupMessages.forEach(msg => {
+            (groupMessages as any[]).forEach(msg => {
                 if (!groupChatMap[msg.groupId]) groupChatMap[msg.groupId] = [];
                 groupChatMap[msg.groupId].push({ ...msg, id: msg.id || msg._id });
             });
 
-            // 6. Fetch Learning Paths
-            const pathsRes = await fetch(`${BACKEND_URL}/paths/${userId}`);
-            const paths: LearningPath[] = await pathsRes.json();
+            // Process Learning Paths
             const pathsMap: Record<string, LearningPath> = {};
-            paths.forEach((p: any) => { 
+            (paths as LearningPath[]).forEach((p: any) => { 
                 pathsMap[p.id] = { ...p, id: p.id || p._id }; 
             });
 
@@ -983,6 +992,37 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (e) { console.error(e); }
     };
 
+    // --- NEW: Toggle Task Completion (Updates Backend & Local) ---
+    const toggleTaskCompletion = async (taskId: string, isCompleted: boolean) => {
+        // 1. Optimistic UI Update
+        setDb(prev => ({
+            ...prev,
+            TASKS: {
+                ...prev.TASKS,
+                [taskId]: {
+                    ...prev.TASKS[taskId],
+                    isCompleted,
+                    completedAt: isCompleted ? new Date().toISOString() : undefined
+                }
+            }
+        }));
+
+        // 2. Persist to Backend
+        try {
+            await fetch(`${BACKEND_URL}/tasks/${taskId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    isCompleted,
+                    completedAt: isCompleted ? new Date().toISOString() : null
+                })
+            });
+        } catch (e) {
+            console.error("Failed to update task status:", e);
+            // Optionally revert UI here on error
+        }
+    };
+
     const deleteTask = async (taskId: string) => {
         try {
             await fetch(`${BACKEND_URL}/tasks/${taskId}`, {
@@ -994,7 +1034,35 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (e) { console.error(e); }
     };
 
-    const archiveCompletedTasks = (userId: string) => { };
+    // --- UPDATED: Archive Completed Tasks (Sync to Backend) ---
+    const archiveCompletedTasks = async (userId: string) => {
+        // Find tasks to archive locally
+        // Cast to Task[] to avoid TS errors
+        const tasksToArchive = (Object.values(db.TASKS) as Task[]).filter(t => t.userId === userId && t.isCompleted && !t.isArchived);
+        
+        // 1. Optimistic UI Update (Remove from active view locally)
+        setDb(prev => {
+            const newTasks = { ...prev.TASKS };
+            tasksToArchive.forEach(t => {
+                if (newTasks[t.id]) newTasks[t.id].isArchived = true;
+            });
+            return { ...prev, TASKS: newTasks };
+        });
+
+        // 2. Persist to Backend (Loop or Bulk)
+        try {
+            // Simple loop for now since we don't have a bulk endpoint defined yet
+            await Promise.all(tasksToArchive.map(t => 
+                fetch(`${BACKEND_URL}/tasks/${t.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ isArchived: true })
+                })
+            ));
+        } catch (e) {
+            console.error("Failed to archive tasks:", e);
+        }
+    };
 
     // --- ASSIGNMENT & QUIZ CREATION (WITH PERSISTENCE) ---
     const createFileAssignment = (title: string, courseId: string) => {
@@ -1215,7 +1283,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             createFlashcardDeck, addFlashcardToDeck, updateFlashcardInDeck, createStandaloneQuiz, updateScratchpad, createPersonalNote, updatePersonalNote,
             deletePersonalNote, saveNodeNote, savePdfToNote, getPdfForNote, removePdfFromNote, shareNoteToSquadron, unshareNote,
             unlockSharedNote, addNoteComment, createLearningPath, assignLearningPath, updateNodeProgress, unlockNextNode, extendLearningPath,
-            skipLearningPath, addTask, deleteTask, archiveCompletedTasks, createFileAssignment, createQuizAssignment, createBossChallenge, sendIntervention,
+            skipLearningPath, addTask, toggleTaskCompletion, deleteTask, archiveCompletedTasks, createFileAssignment, createQuizAssignment, createBossChallenge, sendIntervention,
             adminCreateCourse, generateArchive, addCommunityQuestion, addLessonToCourse, editLessonContent, updateCourseSettings, sendReward,
             fetchUserData
         }}>
@@ -1305,8 +1373,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 };
                 setUser(loggedUser);
                 setError(null);
-                // SAU KHI LOGIN, TẢI DỮ LIỆU CÁ NHÂN (bao gồm Chat)
-                await fetchUserData(loggedUser.id);
+                // No await here! Fire and forget to make UI responsive immediately
+                fetchUserData(loggedUser.id);
                 navigate('dashboard');
             } else {
                 setError(data.message || "Login failed");

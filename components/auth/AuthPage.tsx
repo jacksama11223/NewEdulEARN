@@ -1,15 +1,14 @@
+
 import React, { useState, useContext, useCallback, useEffect } from 'react';
 import { AuthContext, DataContext } from '../../contexts/AppProviders';
 import type { UserRole } from '../../types';
-import ParticleBackground from '../common/ParticleBackground'; // Updated Import
+import ParticleBackground from '../common/ParticleBackground'; 
 
 // --- 3D COMPONENTS ---
 
 const GlowingOrb = () => (
   <div className="absolute top-[-150px] left-[50%] transform -translate-x-1/2 w-[600px] h-[600px] z-[-1] pointer-events-none transition-all duration-1000">
-    {/* Core Planet */}
     <div className="absolute inset-0 rounded-full bg-gradient-to-b from-indigo-500 to-black shadow-[0_0_100px_rgba(99,102,241,0.4)] animate-spin-slow opacity-80"></div>
-    {/* Atmosphere Ring */}
     <div className="absolute inset-[-20px] rounded-full border border-indigo-400/20 blur-sm"></div>
     <div className="absolute inset-[-60px] rounded-full border border-purple-500/10 blur-md rotate-45"></div>
   </div>
@@ -50,23 +49,32 @@ const RoleSwitch = ({ role, setRole }: { role: UserRole, setRole: (r: UserRole) 
   <div className="relative flex bg-[#050810] p-1.5 rounded-2xl shadow-[inset_0_2px_6px_rgba(0,0,0,0.8),0_1px_0_rgba(255,255,255,0.1)] border border-white/5">
     {/* Sliding Indicator */}
     <div 
-      className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-xl bg-gradient-to-b from-gray-700 to-gray-800 shadow-[0_4px_6px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all duration-300 ease-out z-0`}
-      style={{ left: role === 'STUDENT' ? '6px' : 'calc(50%)' }}
+      className={`absolute top-1.5 bottom-1.5 w-[calc(33.33%-6px)] rounded-xl bg-gradient-to-b from-gray-700 to-gray-800 shadow-[0_4px_6px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all duration-300 ease-out z-0`}
+      style={{ 
+        left: role === 'STUDENT' ? '6px' : role === 'TEACHER' ? 'calc(33.33%)' : 'calc(66.66%)' 
+      }}
     ></div>
     
     <button
       type="button"
       onClick={() => setRole('STUDENT')}
-      className={`flex-1 relative z-10 py-3 text-sm font-bold uppercase tracking-wider transition-colors duration-300 ${role === 'STUDENT' ? 'text-white text-shadow-glow' : 'text-gray-500 hover:text-gray-300'}`}
+      className={`flex-1 relative z-10 py-3 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors duration-300 ${role === 'STUDENT' ? 'text-white text-shadow-glow' : 'text-gray-500 hover:text-gray-300'}`}
     >
       Sinh viên
     </button>
     <button
       type="button"
       onClick={() => setRole('TEACHER')}
-      className={`flex-1 relative z-10 py-3 text-sm font-bold uppercase tracking-wider transition-colors duration-300 ${role === 'TEACHER' ? 'text-white text-shadow-glow' : 'text-gray-500 hover:text-gray-300'}`}
+      className={`flex-1 relative z-10 py-3 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors duration-300 ${role === 'TEACHER' ? 'text-white text-shadow-glow' : 'text-gray-500 hover:text-gray-300'}`}
     >
       Giáo viên
+    </button>
+    <button
+      type="button"
+      onClick={() => setRole('ADMIN')}
+      className={`flex-1 relative z-10 py-3 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors duration-300 ${role === 'ADMIN' ? 'text-white text-shadow-glow' : 'text-gray-500 hover:text-gray-300'}`}
+    >
+      Admin
     </button>
   </div>
 );
@@ -104,18 +112,18 @@ const AuthPage: React.FC = () => {
     const [role, setRole] = useState<UserRole>('STUDENT');
     
     const [registerError, setRegisterError] = useState<string | null>(null);
-    const [pendingLogin, setPendingLogin] = useState<{user: string, pass: string} | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
 
     const { login, error: authError } = useContext(AuthContext)!;
-    const { db, registerUser } = useContext(DataContext)!;
+    const { registerUser } = useContext(DataContext)!;
 
-    // Unified Login Handler
-    const handleLogin = useCallback((e: React.FormEvent) => {
+    const handleLogin = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
-        login(username, password);
+        setIsLoading(true);
+        await login(username, password);
+        setIsLoading(false);
     }, [username, password, login]);
 
-    // Registration Handler
     const handleRegister = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
         setRegisterError(null);
@@ -125,45 +133,34 @@ const AuthPage: React.FC = () => {
             return;
         }
 
+        setIsLoading(true);
         try {
-            registerUser(username, password, name, role);
-            setPendingLogin({ user: username, pass: password });
-        } catch (err) {
-            setRegisterError(err instanceof Error ? err.message : "Lỗi đăng ký không xác định.");
+            // 1. Register User
+            await registerUser(username, password, name, role);
+            // 2. Login immediately (No waiting for DB sync)
+            await login(username, password);
+        } catch (err: any) {
+            setRegisterError(err.message || "Lỗi đăng ký không xác định.");
+            setIsLoading(false);
         }
-    }, [username, password, name, role, registerUser]);
+    }, [username, password, name, role, registerUser, login]);
 
-    // Auto-login effect
-    useEffect(() => {
-        if (pendingLogin && db.USERS[pendingLogin.user]) {
-            login(pendingLogin.user, pendingLogin.pass);
-            setPendingLogin(null);
-        }
-    }, [db.USERS, pendingLogin, login]);
-
-    // Reset errors when switching modes
     useEffect(() => {
         setRegisterError(null);
     }, [isRegistering]);
 
     return (
         <div id="auth-page" className="flex items-center justify-center min-h-screen p-4 relative overflow-hidden bg-[#050b14] perspective-1000">
-            {/* Dynamic Backgrounds */}
             <ParticleBackground />
             <GlowingOrb />
             
-            {/* Main Holographic Console */}
             <div 
                 className="relative w-full max-w-md transition-all duration-500 ease-in-out transform hover:scale-[1.01]"
                 style={{ perspective: '2000px' }}
             >
-                {/* Glass Panel Effect */}
                 <div className="relative z-10 bg-gray-900/60 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.7),inset_0_0_0_1px_rgba(255,255,255,0.1),inset_0_1px_20px_rgba(255,255,255,0.05)] overflow-hidden">
-                    
-                    {/* Top Shine */}
                     <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-50"></div>
 
-                    {/* Header */}
                     <div className="text-center mb-10 space-y-2">
                         <div className="inline-block p-4 rounded-full bg-gradient-to-br from-blue-900/50 to-black border border-white/10 mb-4 shadow-[inset_0_2px_4px_rgba(255,255,255,0.1)]">
                             <span className="text-4xl filter drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]">🌌</span>
@@ -177,8 +174,6 @@ const AuthPage: React.FC = () => {
                     </div>
 
                     <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-6">
-                        
-                        {/* Name Field (Register Only) */}
                         {isRegistering && (
                             <div className="space-y-4 animate-pop-in">
                                 <RoleSwitch role={role} setRole={setRole} />
@@ -193,7 +188,6 @@ const AuthPage: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Common Fields */}
                         <TactileInput 
                             id="username" 
                             type="text" 
@@ -212,23 +206,20 @@ const AuthPage: React.FC = () => {
                             onChange={e => setPassword(e.target.value)} 
                         />
 
-                        {/* Errors */}
                         {(authError || registerError) && (
                             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm text-center font-medium shadow-[inset_0_0_10px_rgba(239,68,68,0.2)] animate-shake">
                                 ⚠️ {authError || registerError}
                             </div>
                         )}
 
-                        {/* Submit Button */}
                         <PrimaryButton3D 
-                            loading={!!pendingLogin} 
-                            disabled={!!pendingLogin}
+                            loading={isLoading} 
+                            disabled={isLoading}
                         >
-                            {pendingLogin ? 'ĐANG ĐỒNG BỘ...' : (isRegistering ? 'GIA NHẬP' : 'KHỞI ĐỘNG')}
+                            {isLoading ? (isRegistering ? 'ĐANG KHỞI TẠO...' : 'ĐANG KẾT NỐI...') : (isRegistering ? 'GIA NHẬP' : 'KHỞI ĐỘNG')}
                         </PrimaryButton3D>
                     </form>
 
-                    {/* Footer Toggle */}
                     <div className="mt-8 text-center">
                         <button 
                             type="button"

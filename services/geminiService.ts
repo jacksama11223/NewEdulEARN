@@ -1,7 +1,10 @@
-
 import type { QuizQuestion, LearningNode, Flashcard, ExamQuestion, PlacementTestQuestion, GeneratedModule, RiddleData } from '../types';
 
-const BACKEND_URL = 'http://localhost:5000/api';
+// SỬ DỤNG BIẾN MÔI TRƯỜNG CHO URL BACKEND
+// Khi chạy local, nó sẽ fallback về localhost:5000
+// Khi deploy, bạn cần set biến VITE_BACKEND_URL trong cấu hình deployment (Vercel/Netlify/Render)
+const BASE_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5000';
+const BACKEND_URL = `${BASE_URL}/api`;
 
 // Generic Text Call -> Calls Backend
 export const callGeminiApi = async (

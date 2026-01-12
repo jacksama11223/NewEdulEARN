@@ -1,10 +1,13 @@
-
 import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef, ReactNode } from 'react';
 import { MOCK_DATA } from '../data/mockData.ts';
 import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson } from '../types.ts';
 import { convertContentToFlashcards, generateLegacyArchiveContent } from '../services/geminiService.ts';
 
-const BACKEND_URL = 'http://localhost:5000/api';
+// SỬ DỤNG BIẾN MÔI TRƯỜNG CHO URL BACKEND
+// Khi chạy local, nó sẽ fallback về localhost:5000
+// Khi deploy, bạn cần set biến VITE_BACKEND_URL trong cấu hình deployment
+const BASE_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5000';
+const BACKEND_URL = `${BASE_URL}/api`;
 
 // --- CONTEXT DEFINITIONS ---
 // (Giữ nguyên các interface Context vì chúng không đổi)
@@ -160,7 +163,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Fetch global content that doesn't depend on user login
     const fetchGlobalData = useCallback(async () => {
         try {
-            console.log("Fetching global data...");
+            console.log("Fetching global data from:", BACKEND_URL);
             
             // 1. Fetch Courses (contains structure)
             const coursesRes = await fetch(`${BACKEND_URL}/courses`);

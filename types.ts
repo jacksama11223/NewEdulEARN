@@ -197,6 +197,7 @@ export interface StudyGroup {
 export interface ChatMessage {
   id: string;
   from: string;
+  to?: string;
   text: string;
   timestamp: Date;
   isSOS?: boolean;

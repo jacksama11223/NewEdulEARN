@@ -1,287 +1,369 @@
 
-import { GoogleGenAI, Type, Schema } from "@google/genai";
 import type { QuizQuestion, LearningNode, Flashcard, ExamQuestion, PlacementTestQuestion, GeneratedModule, RiddleData } from '../types';
 
-const getGeminiClient = (apiKey: string) => {
-    return new GoogleGenAI({ apiKey });
-};
+const BACKEND_URL = 'http://localhost:5000/api';
 
-// Generic Text Call
+// Generic Text Call -> Calls Backend
 export const callGeminiApi = async (
     apiKey: string, 
     prompt: string, 
     systemPrompt: string | null = null, 
     config?: { useThinking?: boolean; fileData?: { mimeType: string, data: string } }
 ): Promise<string> => {
-    const ai = getGeminiClient(apiKey);
-    
-    let model = 'gemini-3-flash-preview';
-    
-    if (config?.useThinking) {
-        model = 'gemini-3-pro-preview';
-    } else if (config?.fileData) {
-        if (config.fileData.mimeType.startsWith('image/')) {
-            model = 'gemini-2.5-flash-image';
-        } else if (config.fileData.mimeType.startsWith('video/') || config.fileData.mimeType.startsWith('audio/')) {
-            model = 'gemini-2.5-flash-native-audio-preview-12-2025';
-        } else if (config.fileData.mimeType === 'application/pdf') {
-            model = 'gemini-2.5-flash';
-        }
-    }
-
-    const parts: any[] = [{ text: prompt }];
-    if (config?.fileData) {
-        parts.push({ inlineData: config.fileData });
-    }
-
-    const reqConfig: any = {};
-    if (systemPrompt) reqConfig.systemInstruction = systemPrompt;
-    if (config?.useThinking) reqConfig.thinkingConfig = { thinkingBudget: 32768 };
-
     try {
-        const response = await ai.models.generateContent({
-            model,
-            contents: { role: 'user', parts },
-            config: reqConfig
+        const response = await fetch(`${BACKEND_URL}/ai/generate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey // Pass API Key in header
+            },
+            body: JSON.stringify({
+                prompt,
+                systemPrompt,
+                config
+            }),
         });
-        return response.text || "";
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.message || "Failed to call Backend AI Service");
+        }
+
+        return data.text || "";
     } catch (e: any) {
-        console.error("Gemini API Error:", e);
-        throw new Error(e.message || "Failed to call Gemini API");
+        console.error("Backend AI API Error:", e);
+        throw new Error(e.message || "AI Service Unavailable");
     }
 };
 
-// Generic JSON Schema Call
+// Generic JSON Schema Call -> Calls Backend
 export const callGeminiApiWithSchema = async (
     apiKey: string, 
     prompt: string, 
-    schema?: Schema,
-    config?: { useThinking?: boolean }
+    schema?: any, 
+    config?: { useThinking?: boolean, fileData?: { mimeType: string, data: string } }
 ): Promise<any> => {
-    const ai = getGeminiClient(apiKey);
-    let model = 'gemini-3-flash-preview';
-
-    if (config?.useThinking) {
-        model = 'gemini-3-pro-preview';
-    }
-
-    const reqConfig: any = {
-        responseMimeType: 'application/json',
-        responseSchema: schema
-    };
-
-    if (config?.useThinking) {
-        reqConfig.thinkingConfig = { thinkingBudget: 32768 };
-    }
-
     try {
-        const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: reqConfig
+        const response = await fetch(`${BACKEND_URL}/ai/generate-json`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey // Pass API Key in header
+            },
+            body: JSON.stringify({
+                prompt,
+                schema,
+                config
+            }),
         });
-        const text = response.text || "{}";
-        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanText);
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.message || "Failed to generate structured data from Backend");
+        }
+
+        return data;
     } catch (e: any) {
-        console.error("Gemini Schema API Error:", e);
-        throw new Error(e.message || "Failed to generate structured data");
+        console.error("Backend JSON API Error:", e);
+        throw new Error(e.message || "AI Service Unavailable");
     }
 };
 
-// ... [Keep other functions unchanged: generateJesterExplanation, transformNoteToLesson, convertContentToFlashcards, generateLegacyArchiveContent, generateQuickLessonQuiz, generateQuizFromPrompt, detectSchedulingIntent, transcribeAudio, summarizeTeacherNote, evaluateExplanation, generateImageWithGemini, convertContentToQuiz, simplifyContent, generateLearningPathWithGemini, generatePlacementTest, regenerateSingleNode] ...
+// --- IMPLEMENTED FUNCTIONS ---
 
-// 17. generateNodeFlashcards (UPDATED: 30 Cards)
 export const generateNodeFlashcards = async (apiKey: string, nodeTitle: string, nodeDesc: string): Promise<Flashcard[]> => {
-    const prompt = `Generate exactly 30 flashcards for learning node: ${nodeTitle} - ${nodeDesc}.
-    Ensure definitions are clear, concise, and educational.
+    // OPTIMIZATION: Reduced from 30 to 10 cards to save tokens
+    const prompt = `Generate exactly 10 flashcards for learning node: ${nodeTitle}.
+    Keep definitions very concise.
     Return JSON: { "flashcards": [{ "front": string, "back": string }] }`;
     
-    const schema: Schema = {
-        type: Type.OBJECT,
+    const schema = {
+        type: 'OBJECT',
         properties: {
             flashcards: {
-                type: Type.ARRAY,
+                type: 'ARRAY',
                 items: {
-                    type: Type.OBJECT,
+                    type: 'OBJECT',
                     properties: {
-                        front: { type: Type.STRING },
-                        back: { type: Type.STRING }
+                        front: { type: 'STRING' },
+                        back: { type: 'STRING' }
                     },
                     required: ["front", "back"]
                 }
             }
-        }
+        },
+        required: ["flashcards"]
     };
 
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return res.flashcards?.map((c: any, i: number) => ({...c, id: `fc_${Date.now()}_${i}`})) || [];
 };
 
-// 18. generateNodeExam (UPDATED: Support arrange_words & strict MCQ index)
 export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promise<ExamQuestion[]> => {
-    const prompt = `Generate exactly 20 exam questions for: ${nodeTitle}.
+    // OPTIMIZATION: Reduced from 20 to 5 questions to save tokens
+    const prompt = `Generate exactly 5 exam questions for: ${nodeTitle}.
     
     Include these types:
     1. 'mcq': Multiple Choice. 'correctAnswer' MUST be the index string (e.g. "0", "1", "2", "3").
-    2. 'arrange_words': Scrambled sentence. 'question' is "Arrange the words". 'options' contains the shuffled words. 'correctAnswer' is the full correct sentence string.
-    3. 'fill_gap': Sentence with a blank. 'options' contains the word choices. 'correctAnswer' is the correct word string.
+    2. 'fill_gap': Sentence with a blank.
 
-    Return JSON: { "questions": [{ "id": string, "type": "mcq"|"arrange_words"|"fill_gap", "question": string, "options": [string], "correctAnswer": string, "explanation": string }] }`;
+    Return JSON: { "questions": [{ "id": string, "type": "mcq"|"fill_gap", "question": string, "options": [string], "correctAnswer": string, "explanation": string }] }`;
     
-    const schema: Schema = {
-        type: Type.OBJECT,
+    const schema = {
+        type: 'OBJECT',
         properties: {
             questions: {
-                type: Type.ARRAY,
+                type: 'ARRAY',
                 items: {
-                    type: Type.OBJECT,
+                    type: 'OBJECT',
                     properties: {
-                        id: { type: Type.STRING },
-                        type: { type: Type.STRING, enum: ["mcq", "arrange_words", "fill_gap"] },
-                        question: { type: Type.STRING },
-                        options: { type: Type.ARRAY, items: { type: Type.STRING }, nullable: true },
-                        correctAnswer: { type: Type.STRING },
-                        explanation: { type: Type.STRING }
+                        id: { type: 'STRING' },
+                        type: { type: 'STRING', enum: ["mcq", "fill_gap"] },
+                        question: { type: 'STRING' },
+                        options: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
+                        correctAnswer: { type: 'STRING' },
+                        explanation: { type: 'STRING' }
                     },
                     required: ["question", "correctAnswer", "type"]
                 }
             }
-        }
+        },
+        required: ["questions"]
     };
 
-    // Use Thinking Mode for exams to ensure higher quality questions and distractors
-    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: true });
+    // Disabled thinking to save tokens/time for this simpler request
+    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: false });
     return res.questions || [];
 };
 
-// ... [Keep rest of file unchanged] ...
 export const generateJesterExplanation = async (apiKey: string, questionText: string, correctAnswerText: string): Promise<string> => {
-    const prompt = `Explain like I'm 5 (witty/funny): Question: "${questionText}", Correct: "${correctAnswerText}". Language: Vietnamese.`;
+    const prompt = `Explain like I'm 5 (witty/funny): Question: "${questionText}", Correct: "${correctAnswerText}". Language: Vietnamese. Keep it short.`;
     return callGeminiApi(apiKey, prompt, null, { useThinking: true });
 };
+
 export const transformNoteToLesson = async (apiKey: string, noteTitle: string, noteContent: string): Promise<string> => {
-    const prompt = `Transform to structured lesson (Markdown): Title: ${noteTitle}, Content: ${noteContent}`;
+    // Truncate note content
+    const prompt = `Transform to short structured lesson (Markdown): Title: ${noteTitle}, Content: ${noteContent.substring(0, 2000)}`;
     return callGeminiApi(apiKey, prompt, "Curriculum Designer", { useThinking: true });
 };
+
 export const convertContentToFlashcards = async (apiKey: string, content: string, options?: { useThinking?: boolean }): Promise<Flashcard[]> => {
-    const prompt = `Extract flashcards from: "${content.substring(0, 5000)}". JSON: { "flashcards": [{ "front": "Term", "back": "Def" }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { flashcards: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { front: { type: Type.STRING }, back: { type: Type.STRING } }, required: ["front", "back"] } } } };
+    // OPTIMIZATION: Truncate input and limit output count
+    const prompt = `Extract 5 key flashcards from: "${content.substring(0, 2000)}". JSON: { "flashcards": [{ "front": "Term", "back": "Short Def" }] }`;
+    const schema = { type: 'OBJECT', properties: { flashcards: { type: 'ARRAY', items: { type: 'OBJECT', properties: { front: { type: 'STRING' }, back: { type: 'STRING' } }, required: ["front", "back"] } } }, required: ["flashcards"] };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: options?.useThinking });
     return res.flashcards || [];
 };
+
 export const generateLegacyArchiveContent = async (apiKey: string, data: any, type: 'course'|'squadron', name: string): Promise<string> => {
-    const prompt = `Create nostalgic Legacy Archive for ${type} "${name}". Data: ${JSON.stringify(data).substring(0, 10000)}`;
+    const prompt = `Create nostalgic Legacy Archive for ${type} "${name}". Data: ${JSON.stringify(data).substring(0, 3000)}`;
     return callGeminiApi(apiKey, prompt, "AI Historian", { useThinking: true });
 };
+
 export const generateQuickLessonQuiz = async (apiKey: string, title: string, context: string): Promise<QuizQuestion[]> => {
-    const prompt = `Generate 3 MCQ for: ${title}. Context: ${context.substring(0, 2000)}. JSON: { "questions": [{ "text": "?", "options": ["A"], "correctAnswer": 0 }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { questions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, correctAnswer: { type: Type.INTEGER } }, required: ["text", "options", "correctAnswer"] } } } };
+    const prompt = `Generate 3 MCQ for: ${title}. Context: ${context.substring(0, 1000)}. JSON: { "questions": [{ "text": "?", "options": ["A"], "correctAnswer": 0 }] }`;
+    const schema = { 
+        type: 'OBJECT', 
+        properties: { 
+            questions: { 
+                type: 'ARRAY', 
+                items: { 
+                    type: 'OBJECT', 
+                    properties: { 
+                        text: { type: 'STRING' }, 
+                        options: { type: 'ARRAY', items: { type: 'STRING' } }, 
+                        correctAnswer: { type: 'INTEGER' } 
+                    }, 
+                    required: ["text", "options", "correctAnswer"] 
+                } 
+            } 
+        }, 
+        required: ["questions"]
+    };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return res.questions?.map((q: any, i: number) => ({...q, id: `q_${Date.now()}_${i}`})) || [];
 };
+
 export const generateQuizFromPrompt = async (apiKey: string, userPrompt: string): Promise<QuizQuestion[]> => {
-    const prompt = `${userPrompt}. JSON: { "questions": [{ "text": "?", "options": ["A"], "correctAnswer": 0 }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { questions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, correctAnswer: { type: Type.INTEGER } }, required: ["text", "options", "correctAnswer"] } } } };
+    const prompt = `${userPrompt}. Max 5 questions. JSON: { "questions": [{ "text": "?", "options": ["A"], "correctAnswer": 0 }] }`;
+    const schema = { 
+        type: 'OBJECT', 
+        properties: { 
+            questions: { 
+                type: 'ARRAY', 
+                items: { 
+                    type: 'OBJECT', 
+                    properties: { 
+                        text: { type: 'STRING' }, 
+                        options: { type: 'ARRAY', items: { type: 'STRING' } }, 
+                        correctAnswer: { type: 'INTEGER' } 
+                    }, 
+                    required: ["text", "options", "correctAnswer"] 
+                } 
+            } 
+        },
+        required: ["questions"]
+    };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return res.questions?.map((q: any, i: number) => ({...q, id: `q_gen_${Date.now()}_${i}`})) || [];
 };
+
 export const detectSchedulingIntent = async (apiKey: string, message: string, currentTime: string): Promise<{ detected: boolean, title?: string, isoTime?: string }> => {
     const prompt = `Analyze scheduling: "${message}". Time: ${currentTime}. JSON: { "detected": bool, "title": str, "isoTime": str }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { detected: { type: Type.BOOLEAN }, title: { type: Type.STRING, nullable: true }, isoTime: { type: Type.STRING, nullable: true } } };
+    const schema = { type: 'OBJECT', properties: { detected: { type: 'BOOLEAN' }, title: { type: 'STRING', nullable: true }, isoTime: { type: 'STRING', nullable: true } }, required: ["detected"] };
     return callGeminiApiWithSchema(apiKey, prompt, schema);
 };
+
 export const transcribeAudio = async (apiKey: string, base64Audio: string): Promise<string> => {
-    const ai = getGeminiClient(apiKey);
-    const response = await ai.models.generateContent({ model: 'gemini-2.5-flash-native-audio-preview-12-2025', contents: { parts: [{ inlineData: { mimeType: 'audio/mp3', data: base64Audio } }, { text: "Transcribe to text." }] } });
-    return response.text || "";
+    const prompt = "Transcribe to text.";
+    const fileData = { mimeType: 'audio/mp3', data: base64Audio };
+    return callGeminiApi(apiKey, prompt, null, { fileData });
 };
+
 export const summarizeTeacherNote = async (apiKey: string, text: string): Promise<string> => {
-    return callGeminiApi(apiKey, `Summarize: ${text}`, null, { useThinking: true });
+    return callGeminiApi(apiKey, `Summarize briefly: ${text.substring(0, 1000)}`, null, { useThinking: true });
 };
+
 export const evaluateExplanation = async (apiKey: string, problem: string, explanation: string): Promise<{ isHelpful: boolean, reason: string }> => {
-    const prompt = `Evaluate explanation for "${problem}". Expl: "${explanation}". JSON: { "isHelpful": bool, "reason": str }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { isHelpful: { type: Type.BOOLEAN }, reason: { type: Type.STRING } } };
+    const prompt = `Evaluate explanation for "${problem.substring(0, 200)}". Expl: "${explanation.substring(0, 200)}". JSON: { "isHelpful": bool, "reason": str }`;
+    const schema = { type: 'OBJECT', properties: { isHelpful: { type: 'BOOLEAN' }, reason: { type: 'STRING' } }, required: ["isHelpful", "reason"] };
     return callGeminiApiWithSchema(apiKey, prompt, schema);
 };
+
 export const generateImageWithGemini = async (apiKey: string, prompt: string, aspectRatio: "1:1" | "16:9" | "9:16"): Promise<string> => {
-    const ai = getGeminiClient(apiKey);
-    const response = await ai.models.generateContent({ model: 'gemini-2.5-flash-image', contents: { parts: [{ text: prompt }] }, config: { imageConfig: { aspectRatio } } });
-    for (const part of response.candidates?.[0]?.content?.parts || []) { if (part.inlineData) return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`; }
-    throw new Error("No image generated.");
+    throw new Error("Image generation via Backend not yet implemented. Please use text features.");
 };
+
 export const convertContentToQuiz = async (apiKey: string, content: string): Promise<QuizQuestion[]> => {
     return generateQuickLessonQuiz(apiKey, "Derived Quiz", content);
 };
+
 export const simplifyContent = async (apiKey: string, content: string): Promise<string> => {
-    return callGeminiApi(apiKey, `Explain like I'm 5: ${content.substring(0, 5000)}`, null, { useThinking: true });
+    return callGeminiApi(apiKey, `Explain like I'm 5 (short): ${content.substring(0, 2000)}`, null, { useThinking: true });
 };
+
 export const generateLearningPathWithGemini = async (apiKey: string, topicOrContent: string, isContent: boolean, context: any): Promise<LearningNode[]> => {
-    const prompt = `Generate learning path for: ${topicOrContent.substring(0, 1000)}. Level ${context.level}. JSON: { "nodes": [{ "title": str, "description": str, "type": "theory"|"practice"|"challenge" }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { nodes: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, type: { type: Type.STRING, enum: ["theory", "practice", "challenge"] } }, required: ["title", "description", "type"] } } } };
+    // OPTIMIZATION: Truncate input heavily (500 chars) and limit to exactly 5 nodes.
+    const safeInput = topicOrContent.substring(0, 500); 
     
-    // Use Thinking for better curriculum design
-    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: true });
-    return res.nodes?.map((n: any, i: number) => ({ ...n, id: `node_${Date.now()}_${i}`, isLocked: i > 0, isCompleted: false, flashcardsMastered: 0 })) || [];
+    const prompt = `Generate a mini learning path (exactly 5 nodes) for: "${safeInput}". 
+    Level: ${context.level}. 
+    Keep descriptions very short (max 15 words).
+    Return strictly JSON: { "nodes": [{ "title": string, "description": string, "type": "theory"|"practice"|"challenge" }] }`;
+    
+    const schema = { 
+        type: 'OBJECT', 
+        properties: { 
+            nodes: { 
+                type: 'ARRAY', 
+                items: { 
+                    type: 'OBJECT', 
+                    properties: { 
+                        title: { type: 'STRING' }, 
+                        description: { type: 'STRING' }, 
+                        type: { type: 'STRING' }
+                    }, 
+                    required: ["title", "description", "type"] 
+                } 
+            } 
+        }, 
+        required: ["nodes"] 
+    };
+    
+    // Disable thinking mode for path generation to improve speed/cost
+    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: false });
+    
+    return res.nodes?.map((n: any, i: number) => {
+        const safeType = ['theory', 'practice', 'challenge'].includes(n.type) ? n.type : 'theory';
+        return { 
+            ...n, 
+            type: safeType,
+            id: `node_${Date.now()}_${i}`, 
+            isLocked: i > 0, 
+            isCompleted: false, 
+            flashcardsMastered: 0 
+        };
+    }) || [];
 };
+
 export const generatePlacementTest = async (apiKey: string, topic: string): Promise<PlacementTestQuestion[]> => {
-    const prompt = `Generate 5 placement questions for: ${topic}. JSON: { "questions": [{ "question": str, "options": [str], "correctAnswer": int }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { questions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { question: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, correctAnswer: { type: Type.INTEGER } }, required: ["question", "options", "correctAnswer"] } } } };
+    const prompt = `Generate 5 placement questions for: ${topic.substring(0, 100)}. JSON: { "questions": [{ "question": str, "options": [str], "correctAnswer": int }] }`;
+    const schema = { type: 'OBJECT', properties: { questions: { type: 'ARRAY', items: { type: 'OBJECT', properties: { question: { type: 'STRING' }, options: { type: 'ARRAY', items: { type: 'STRING' } }, correctAnswer: { type: 'INTEGER' } }, required: ["question", "options", "correctAnswer"] } } }, required: ["questions"] };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return res.questions?.map((q: any, i: number) => ({...q, id: `pt_${i}`})) || [];
 };
+
 export const regenerateSingleNode = async (apiKey: string, pathTopic: string, oldNode: LearningNode, context: string): Promise<LearningNode> => {
-    const prompt = `Regenerate node for "${pathTopic}". Old: ${JSON.stringify(oldNode)}. Context: ${context}. JSON: { "title": str, "description": str, "type": "theory"|"practice"|"challenge" }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, type: { type: Type.STRING, enum: ["theory", "practice", "challenge"] } } };
+    const prompt = `Regenerate node for "${pathTopic}". Old: ${JSON.stringify(oldNode)}. Context: ${context}. Keep desc short. JSON: { "title": str, "description": str, "type": "theory"|"practice"|"challenge" }`;
+    const schema = { type: 'OBJECT', properties: { title: { type: 'STRING' }, description: { type: 'STRING' }, type: { type: 'STRING', enum: ["theory", "practice", "challenge"] } }, required: ["title", "description", "type"] };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return { ...oldNode, ...res };
 };
+
 export const generateAdvancedPath = async (apiKey: string, baseTopic: string, lastNodeTitle: string): Promise<LearningNode[]> => {
-    const prompt = `Create advanced extension for "${baseTopic}" after "${lastNodeTitle}". JSON: { "nodes": [{ "title": str, "description": str, "type": "theory"|"practice"|"challenge" }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { nodes: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, type: { type: Type.STRING, enum: ["theory", "practice", "challenge"] } }, required: ["title", "description", "type"] } } } };
+    const prompt = `Create 3 advanced extension nodes for "${baseTopic}" after "${lastNodeTitle}". JSON: { "nodes": [{ "title": str, "description": str, "type": "theory"|"practice"|"challenge" }] }`;
+    const schema = { type: 'OBJECT', properties: { nodes: { type: 'ARRAY', items: { type: 'OBJECT', properties: { title: { type: 'STRING' }, description: { type: 'STRING' }, type: { type: 'STRING', enum: ["theory", "practice", "challenge"] } }, required: ["title", "description", "type"] } } }, required: ["nodes"] };
     
-    // Use Thinking for advanced path design
-    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: true });
+    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: false });
     return res.nodes?.map((n: any, i: number) => ({ ...n, id: `adv_node_${Date.now()}_${i}`, isLocked: true, isCompleted: false, flashcardsMastered: 0 })) || [];
 };
+
 export const enhanceNoteWithGemini = async (apiKey: string, content: string, action: 'summarize' | 'expand' | 'fix' | 'quiz' | 'harvest'): Promise<string> => {
-    return callGeminiApi(apiKey, `${action}: ${content}`, null, { useThinking: true });
+    // Truncate to save tokens
+    return callGeminiApi(apiKey, `${action}: ${content.substring(0, 1500)}`, null, { useThinking: true });
 };
+
 export const generateCourseSyllabus = async (apiKey: string, topic: string, audience: string): Promise<GeneratedModule[]> => {
-    const prompt = `Syllabus for "${topic}" for "${audience}". JSON: { "modules": [{ "title": str, "items": [{ "title": str, "type": "lesson_video"|"lesson_text"|"assignment_quiz"|"assignment_file", "contentOrDescription": str }] }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { modules: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, type: { type: Type.STRING }, contentOrDescription: { type: Type.STRING } }, required: ["title", "type", "contentOrDescription"] } } }, required: ["title", "items"] } } } };
+    const prompt = `Syllabus for "${topic}" for "${audience}". Max 2 modules. JSON: { "modules": [{ "title": str, "items": [{ "title": str, "type": "lesson_video"|"lesson_text"|"assignment_quiz"|"assignment_file", "contentOrDescription": string }] }] }`;
+    const schema = { type: 'OBJECT', properties: { modules: { type: 'ARRAY', items: { type: 'OBJECT', properties: { title: { type: 'STRING' }, items: { type: 'ARRAY', items: { type: 'OBJECT', properties: { title: { type: 'STRING' }, type: { type: 'STRING' }, contentOrDescription: { type: 'STRING' } }, required: ["title", "type", "contentOrDescription"] } } }, required: ["title", "items"] } } }, required: ["modules"] };
     
-    // Use Thinking for syllabus design
+    // Syllabus is complex, keep thinking true but restrict size
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: true });
     return res.modules || [];
 };
+
 export const generateGatekeeperTest = async (apiKey: string, pathTopic: string, nodesTitle: string[]): Promise<ExamQuestion[]> => {
-    const prompt = `Gatekeeper test for "${pathTopic}". Covered: ${nodesTitle.join(', ')}. 5 Qs. JSON: { "questions": [{ "id": str, "type": "mcq", "question": str, "options": [str], "correctAnswer": str }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { questions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, type: { type: Type.STRING }, question: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING }, nullable: true }, correctAnswer: { type: Type.STRING } }, required: ["question", "correctAnswer", "type"] } } } };
+    const prompt = `Gatekeeper test for "${pathTopic}". Covered: ${nodesTitle.join(', ').substring(0, 500)}. 5 Qs. JSON: { "questions": [{ "id": str, "type": "mcq", "question": str, "options": [str], "correctAnswer": str }] }`;
+    const schema = { type: 'OBJECT', properties: { questions: { type: 'ARRAY', items: { type: 'OBJECT', properties: { id: { type: 'STRING' }, type: { type: 'STRING' }, question: { type: 'STRING' }, options: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true }, correctAnswer: { type: 'STRING' } }, required: ["question", "correctAnswer", "type"] } } }, required: ["questions"] };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return res.questions || [];
 };
+
 export const generateSpeedRunQuestions = async (apiKey: string, topic: string, subtopics: string[]): Promise<ExamQuestion[]> => {
-    const prompt = `10 speed run MCQ for "${topic}". JSON: { "questions": [{ "id": str, "type": "mcq", "question": str, "options": [str], "correctAnswer": str }] }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { questions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, type: { type: Type.STRING, enum: ["mcq"] }, question: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, correctAnswer: { type: Type.STRING } }, required: ["question", "correctAnswer", "options"] } } } };
+    const prompt = `5 speed run MCQ for "${topic}". JSON: { "questions": [{ "id": str, "type": "mcq", "question": str, "options": [str], "correctAnswer": str }] }`;
+    const schema = { type: 'OBJECT', properties: { questions: { type: 'ARRAY', items: { type: 'OBJECT', properties: { id: { type: 'STRING' }, type: { type: 'STRING', enum: ["mcq"] }, question: { type: 'STRING' }, options: { type: 'ARRAY', items: { type: 'STRING' } }, correctAnswer: { type: 'STRING' } }, required: ["question", "correctAnswer", "options"] } } }, required: ["questions"] };
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
     return res.questions || [];
 };
+
 export const generateTreasureRiddle = async (apiKey: string, topic: string): Promise<RiddleData> => {
     const prompt = `Riddle about "${topic}". JSON: { "question": str, "answer": str, "hint": str }`;
-    const schema: Schema = { type: Type.OBJECT, properties: { question: { type: Type.STRING }, answer: { type: Type.STRING }, hint: { type: Type.STRING } }, required: ["question", "answer", "hint"] };
+    const schema = { type: 'OBJECT', properties: { question: { type: 'STRING' }, answer: { type: 'STRING' }, hint: { type: 'STRING' } }, required: ["question", "answer", "hint"] };
     return callGeminiApiWithSchema(apiKey, prompt, schema);
 };
+
 export const refineTextWithOracle = async (apiKey: string, text: string): Promise<string> => {
-    return callGeminiApi(apiKey, `Refine academically: "${text}"`, null, { useThinking: true });
+    return callGeminiApi(apiKey, `Refine academically: "${text.substring(0, 1000)}"`, null, { useThinking: true });
 };
+
 export const generateFlashcardsFromPdf = async (apiKey: string, pdfBase64: string): Promise<{ title: string, cards: Flashcard[] }> => {
-    const ai = getGeminiClient(apiKey);
-    const schema: Schema = { type: Type.OBJECT, properties: { title: { type: Type.STRING }, flashcards: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { front: { type: Type.STRING }, back: { type: Type.STRING } }, required: ["front", "back"] } } }, required: ["title", "flashcards"] };
-    try { const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: { role: 'user', parts: [{ text: "Extract 20 flashcards from PDF." }, { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }] }, config: { responseMimeType: 'application/json', responseSchema: schema, thinkingConfig: { thinkingBudget: 32768 } } }); const json = JSON.parse(response.text!.replace(/```json|```/g, '').trim()); return { title: json.title || "PDF Deck", cards: (json.flashcards||[]).map((fc:any, i:number) => ({ id: `fc_gen_${Date.now()}_${i}`, front: fc.front, back: fc.back })) }; } catch (e: any) { throw new Error("PDF Flashcard Error: " + e.message); }
+    // Only 10 cards to save tokens
+    const schema = { type: 'OBJECT', properties: { title: { type: 'STRING' }, flashcards: { type: 'ARRAY', items: { type: 'OBJECT', properties: { front: { type: 'STRING' }, back: { type: 'STRING' } }, required: ["front", "back"] } } }, required: ["title", "flashcards"] };
+    try { 
+        const fileData = { mimeType: 'application/pdf', data: pdfBase64 };
+        const json = await callGeminiApiWithSchema(apiKey, "Extract 10 flashcards from PDF.", schema, { useThinking: true, fileData });
+        return { title: json.title || "PDF Deck", cards: (json.flashcards||[]).map((fc:any, i:number) => ({ id: `fc_gen_${Date.now()}_${i}`, front: fc.front, back: fc.back })) }; 
+    } catch (e: any) { throw new Error("PDF Flashcard Error: " + e.message); }
 };
+
 export const checkNoteConnections = async (apiKey: string, currentNote: string, otherNotes: { id: string, title: string, content: string }[]): Promise<{ noteTitle: string, reason: string }[]> => {
-    const dbContext = otherNotes.map(n => `- Title: "${n.title}"\n  Snippet: "${n.content.substring(0, 300).replace(/\n/g, ' ')}..."`).join('\n');
-    const prompt = `Find connections between note and database. JSON: { "suggestions": [{ "noteTitle": str, "reason": str }] }\nNote: "${currentNote}"\nDB:\n${dbContext}`;
-    try { const responseText = await callGeminiApi(apiKey, prompt, null, { useThinking: true }); return JSON.parse(responseText.replace(/```json|```/g, '').trim()).suggestions || []; } catch (e) { return []; }
+    const dbContext = otherNotes.map(n => `- Title: "${n.title}"\n  Snippet: "${n.content.substring(0, 150).replace(/\n/g, ' ')}..."`).join('\n').substring(0, 1000);
+    const prompt = `Find connections. JSON: { "suggestions": [{ "noteTitle": str, "reason": str }] }\nNote: "${currentNote.substring(0, 500)}"\nDB:\n${dbContext}`;
+    const schema = { type: 'OBJECT', properties: { suggestions: { type: 'ARRAY', items: { type: 'OBJECT', properties: { noteTitle: { type: 'STRING' }, reason: { type: 'STRING' } }, required: ["noteTitle", "reason"] } } }, required: ["suggestions"] };
+    try { 
+        const json = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: true });
+        return json.suggestions || []; 
+    } catch (e) { return []; }
 };

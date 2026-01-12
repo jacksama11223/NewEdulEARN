@@ -117,20 +117,28 @@ const LearningPathCreatorPage: React.FC = () => {
         if (!apiKey) { setError("API Key Required"); return; }
 
         setIsLoading(true);
+        setError(null); // Clear previous errors
+        
         try {
             const context = { level: targetLevel, goal, time: timeCommitment };
             const nodes = await generateLearningPathWithGemini(apiKey, inputText, mode === 'content', context);
+            
+            if (nodes.length === 0) {
+                throw new Error("AI không trả về dữ liệu node nào.");
+            }
+
             setGeneratedNodes(nodes);
             setStep('PREVIEW');
-        } catch (e) {
-            setError("Lỗi tạo lộ trình.");
-            setStep('TOPIC'); // Reset on error
+        } catch (e: any) {
+            console.error("Path Gen Error:", e);
+            setError(`Lỗi tạo lộ trình: ${e.message}`);
+            setStep('LEVEL_CHOICE'); // Return to Level Choice so user can retry, NOT TOPIC
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleSave = useCallback(() => {
+    const handleSave = useCallback(async () => {
         if (!user || generatedNodes.length === 0) return;
         
         if (isTeacher) {
@@ -140,7 +148,7 @@ const LearningPathCreatorPage: React.FC = () => {
             // Student Save
             try {
                 // Now createLearningPath returns the ID
-                const newPathId = createLearningPath(
+                const newPathId = await createLearningPath(
                     user.id, 
                     title, 
                     inputText.substring(0, 50), 
@@ -149,14 +157,6 @@ const LearningPathCreatorPage: React.FC = () => {
                     isWagerEnabled ? wagerAmount : undefined
                 );
                 
-                let message = "Đã lưu lộ trình thành công!";
-                if (isWagerEnabled && wagerAmount > 0) {
-                    message += `\n🔥 Hợp đồng đã ký! -${wagerAmount} Kim Cương.\nHãy hoàn thành trong 7 ngày để không bị mất tiền cược!`;
-                }
-                
-                // Show standard alert first (or replace with nice toast later)
-                // alert(message); 
-
                 // Open Challenge Modal instead of navigating immediately
                 setCreatedPathInfo({ id: newPathId, title: title });
                 setIsChallengeModalOpen(true);
@@ -403,8 +403,9 @@ const LearningPathCreatorPage: React.FC = () => {
                         </button>
                     </div>
                     
-                    {isLoading && <div className="mt-4"><LoadingSpinner size={6} /><p className="text-sm text-gray-400 mt-2">Đang tạo bài test...</p></div>}
-                    {error && <p className="text-red-400">{error}</p>}
+                    {/* Error display moved to here */}
+                    {error && <div className="mt-4 p-3 bg-red-900/20 border border-red-500/50 rounded-lg text-red-300">{error}</div>}
+                    {isLoading && <div className="mt-4"><LoadingSpinner size={6} /><p className="text-sm text-gray-400 mt-2">Đang xử lý...</p></div>}
                 </div>
             )}
 
@@ -443,6 +444,7 @@ const LearningPathCreatorPage: React.FC = () => {
                     <LoadingSpinner size={12} />
                     <h2 className="text-2xl font-bold text-white mt-8 animate-pulse">AI đang thiết kế lộ trình...</h2>
                     <p className="text-gray-400 mt-2">Dựa trên: {level} • {goal}</p>
+                    <p className="text-xs text-center text-blue-300 animate-pulse mt-2">AI đang suy nghĩ...</p>
                 </div>
             )}
 
@@ -598,7 +600,7 @@ const LearningPathCreatorPage: React.FC = () => {
                                 🗑️ Xóa
                             </button>
                         </div>
-                        {isRegeneratingNode && <p className="text-xs text-center text-blue-300 animate-pulse">Gemini 3 Pro đang suy nghĩ...</p>}
+                        {isRegeneratingNode && <p className="text-xs text-center text-blue-300 animate-pulse">Gemini 2.5 Flash đang suy nghĩ...</p>}
                     </div>
                 )}
             </Modal>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef, ReactNode } from 'react';
 import { MOCK_DATA } from '../data/mockData.ts';
-import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course } from '../types.ts';
+import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson } from '../types.ts';
 import { convertContentToFlashcards, generateLegacyArchiveContent } from '../services/geminiService.ts';
 
 const BACKEND_URL = 'http://localhost:5000/api';
@@ -80,8 +80,8 @@ export interface DataContextType {
     addNoteComment: (noteId: string, userId: string, content: string, highlightedText?: string) => void;
 
     // Learning Path
-    createLearningPath: (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number) => string;
-    assignLearningPath: (teacherName: string, studentIds: string[], pathData: any) => void;
+    createLearningPath: (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number) => Promise<string>;
+    assignLearningPath: (teacherName: string, studentIds: string[], pathData: any) => Promise<void>; // Updated signature
     updateNodeProgress: (pathId: string, nodeId: string, data: Partial<LearningNode>) => void;
     unlockNextNode: (pathId: string, nodeId: string) => void;
     extendLearningPath: (pathId: string, newNodes: LearningNode[]) => void;
@@ -97,13 +97,12 @@ export interface DataContextType {
     createQuizAssignment: (title: string, courseId: string, questions: QuizQuestion[]) => void;
     createBossChallenge: (courseId: string, title: string, description: string, xp: number) => void;
     sendIntervention: (assignmentId: string, questionId: string, note: string, studentIds: string[]) => void;
-    adminCreateCourse: (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => void;
+    adminCreateCourse: (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => Promise<void>;
     generateArchive: (apiKey: string, type: 'course'|'squadron', id: string, name: string) => Promise<string>;
     addCommunityQuestion: (userId: string, nodeId: string, question: QuizQuestion) => void;
     addLessonToCourse: (courseId: string, title: string, content: string) => void;
     editLessonContent: (lessonId: string, newContent: string) => void; // ADDED
     updateCourseSettings: (courseId: string, settings: Partial<Course>) => void;
-    // Added fetchUserData to interface to resolve type errors
     fetchUserData: (userId: string) => Promise<void>;
 }
 
@@ -156,25 +155,134 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [db, setDb] = useState<Database>(MOCK_DATA);
     const [pdfStorage, setPdfStorage] = useState<Record<string, File>>({});
 
+    // --- GLOBAL DATA FETCHING (Assignments, Quizzes, COURSES, LESSONS) ---
+    // Fetch global content that doesn't depend on user login
+    const fetchGlobalData = useCallback(async () => {
+        try {
+            console.log("Fetching global data...");
+            
+            // 1. Fetch Courses (contains structure)
+            const coursesRes = await fetch(`${BACKEND_URL}/courses`);
+            const coursesData: any[] = await coursesRes.json();
+            
+            const coursesList: Course[] = [];
+            const courseStructure: Record<string, CourseStructure> = {};
+
+            coursesData.forEach(c => {
+                // Split backend model into frontend separate states
+                coursesList.push({
+                    id: c.id,
+                    name: c.name,
+                    teacher: c.teacher,
+                    defaultPersona: c.defaultPersona
+                });
+                courseStructure[c.id] = { modules: c.modules || [] };
+            });
+
+            // 2. Fetch Lessons (Content)
+            const lessonsRes = await fetch(`${BACKEND_URL}/lessons`);
+            const lessonsData: Lesson[] = await lessonsRes.json();
+            const lessonsMap: Record<string, Lesson> = {};
+            lessonsData.forEach(l => { lessonsMap[l.id] = l; });
+
+            // 3. Fetch Assignments
+            const assignRes = await fetch(`${BACKEND_URL}/assignments`);
+            const assignments: Assignment[] = await assignRes.json();
+            const assignMap: Record<string, Assignment> = {};
+            assignments.forEach(a => { assignMap[a.id] = a; });
+
+            // 4. Fetch Quizzes
+            const quizzesRes = await fetch(`${BACKEND_URL}/quizzes`);
+            const quizzes: Quiz[] = await quizzesRes.json();
+            const quizMap: Record<string, Quiz> = {};
+            quizzes.forEach(q => { quizMap[q.id] = q; });
+
+            // 5. Fetch Quiz Submissions
+            const subRes = await fetch(`${BACKEND_URL}/quiz-submissions`);
+            const submissions: QuizSubmission[] = await subRes.json();
+            const subMap: Record<string, Record<string, QuizSubmission>> = {};
+            // Group by QuizId then StudentId
+            submissions.forEach((s: any) => {
+                if (!subMap[s.quizId]) subMap[s.quizId] = {};
+                subMap[s.quizId][s.studentId] = s;
+            });
+
+            setDb(prev => ({
+                ...prev,
+                COURSES: [...prev.COURSES, ...coursesList.filter(nc => !prev.COURSES.some(ec => ec.id === nc.id))], // Merge without dupes
+                COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, ...courseStructure },
+                LESSONS: { ...prev.LESSONS, ...lessonsMap },
+                ASSIGNMENTS: { ...prev.ASSIGNMENTS, ...assignMap },
+                QUIZZES: { ...prev.QUIZZES, ...quizMap },
+                QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, ...subMap }
+            }));
+        } catch (e) {
+            console.error("Failed to fetch global data:", e);
+        }
+    }, []);
+
+    // Trigger global fetch on mount
+    useEffect(() => {
+        fetchGlobalData();
+    }, [fetchGlobalData]);
+
     // --- SYNC WITH BACKEND ---
     const fetchUserData = useCallback(async (userId: string) => {
         try {
-            // Tải Notes
+            console.log("Fetching user data for:", userId);
+            // 1. Tải Notes
             const notesRes = await fetch(`${BACKEND_URL}/notes/${userId}`);
             const notes: PersonalNote[] = await notesRes.json();
             const notesMap: Record<string, PersonalNote> = {};
             notes.forEach(n => { notesMap[n._id || n.id] = { ...n, id: n._id || n.id }; });
 
-            // Tải Tasks
+            // 2. Tải Tasks
             const tasksRes = await fetch(`${BACKEND_URL}/tasks/${userId}`);
             const tasks: Task[] = await tasksRes.json();
             const tasksMap: Record<string, Task> = {};
             tasks.forEach(t => { tasksMap[t._id || t.id] = { ...t, id: t._id || t.id }; });
 
+            // 3. Tải Lịch sử Chat (1-1)
+            const chatRes = await fetch(`${BACKEND_URL}/chat/history/${userId}`);
+            const chatMessages: ChatMessage[] = await chatRes.json();
+            const chatMap: Record<string, ChatMessage[]> = {};
+            chatMessages.forEach(msg => {
+                const key = [msg.from, msg.to || ''].sort().join('_');
+                if (!chatMap[key]) chatMap[key] = [];
+                const formattedMsg = { ...msg, id: (msg as any)._id || msg.id };
+                chatMap[key].push(formattedMsg);
+            });
+
+            // 4. Fetch Groups
+            const groupsRes = await fetch(`${BACKEND_URL}/groups`);
+            const groups: StudyGroup[] = await groupsRes.json();
+            const formattedGroups = groups.map((g: any) => ({ ...g, id: g.id || g._id }));
+
+            // 5. Fetch Group Messages
+            const groupChatRes = await fetch(`${BACKEND_URL}/group-chat/all`); 
+            const groupMessages: any[] = await groupChatRes.json();
+            const groupChatMap: Record<string, GroupChatMessage[]> = {};
+            groupMessages.forEach(msg => {
+                if (!groupChatMap[msg.groupId]) groupChatMap[msg.groupId] = [];
+                groupChatMap[msg.groupId].push({ ...msg, id: msg.id || msg._id });
+            });
+
+            // 6. Fetch Learning Paths
+            const pathsRes = await fetch(`${BACKEND_URL}/paths/${userId}`);
+            const paths: LearningPath[] = await pathsRes.json();
+            const pathsMap: Record<string, LearningPath> = {};
+            paths.forEach((p: any) => { 
+                pathsMap[p.id] = { ...p, id: p.id || p._id }; 
+            });
+
             setDb(prev => ({
                 ...prev,
                 PERSONAL_NOTES: notesMap,
-                TASKS: tasksMap
+                TASKS: tasksMap,
+                CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, ...chatMap },
+                STUDY_GROUPS: formattedGroups,
+                GROUP_CHAT_MESSAGES: groupChatMap,
+                LEARNING_PATHS: pathsMap
             }));
         } catch (e) {
             console.error("Failed to fetch user data from server:", e);
@@ -228,7 +336,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { ...prev, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [assignmentId]: newSubs } };
         });
     };
-    const submitQuiz = (quizId: string, userId: string, answers: Record<string, number>) => {
+
+    // --- QUIZ SUBMISSION WITH PERSISTENCE ---
+    const submitQuiz = async (quizId: string, userId: string, answers: Record<string, number>) => {
         const quiz = db.QUIZZES[quizId];
         let score = 0;
         if (quiz) {
@@ -236,14 +346,52 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         const total = quiz?.questions.length || 0;
         const percentage = total > 0 ? (score/total)*100 : 0;
+        
+        const submissionPayload = {
+            quizId,
+            studentId: userId,
+            score,
+            total,
+            percentage,
+            answers,
+            timestamp: new Date().toISOString()
+        };
+
+        // Optimistic Update
         setDb(prev => ({
             ...prev,
-            QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: { ...prev.QUIZ_SUBMISSIONS[quizId], [userId]: { score, total, percentage, timestamp: new Date().toISOString(), answers } } }
+            QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: { ...prev.QUIZ_SUBMISSIONS[quizId], [userId]: submissionPayload } }
         }));
+
+        // Persist
+        try {
+            await fetch(`${BACKEND_URL}/quiz-submissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(submissionPayload)
+            });
+        } catch (e) {
+            console.error("Failed to persist quiz submission", e);
+        }
     };
-    const updateQuizQuestions = (quizId: string, questions: QuizQuestion[]) => {
+
+    // --- QUIZ UPDATE WITH PERSISTENCE ---
+    const updateQuizQuestions = async (quizId: string, questions: QuizQuestion[]) => {
+        // Optimistic Update
         setDb(prev => ({ ...prev, QUIZZES: { ...prev.QUIZZES, [quizId]: { ...prev.QUIZZES[quizId], questions } } }));
+        
+        // Persist
+        try {
+            await fetch(`${BACKEND_URL}/quizzes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: quizId, title: db.QUIZZES[quizId]?.title, questions })
+            });
+        } catch (e) {
+            console.error("Failed to update quiz questions", e);
+        }
     };
+
     const addDiscussionPost = (lessonId: string, user: User, text: string) => {
         setDb(prev => {
             const posts = prev.DISCUSSION[lessonId] || [];
@@ -362,72 +510,135 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.log(`User ${userId} scored ${score} in Speed Run`);
     };
     
-    const sendChatMessage = (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => {
+    // --- CHAT WITH MONGODB PERSISTENCE ---
+    const sendChatMessage = async (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => {
         const key = [fromId, toId].sort().join('_');
-        setDb(prev => {
-            const msgs = prev.CHAT_MESSAGES[key] || [];
-            const newMsg = { id: `msg_${Date.now()}`, from: fromId, text, timestamp: new Date(), challenge, intel, trade, gradeDispute, reward, squadronInvite };
-            return { ...prev, CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, [key]: [...msgs, newMsg] } };
-        });
+        const id = `msg_${Date.now()}`;
+        const newMsgPayload = { id, from: fromId, to: toId, text, timestamp: new Date(), challenge, intel, trade, gradeDispute, reward, squadronInvite };
+
+        try {
+            setDb(prev => {
+                const msgs = prev.CHAT_MESSAGES[key] || [];
+                return { ...prev, CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, [key]: [...msgs, newMsgPayload] } };
+            });
+
+            await fetch(`${BACKEND_URL}/chat/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newMsgPayload)
+            });
+        } catch (e) {
+            console.error("Failed to send chat message:", e);
+            alert("Lỗi kết nối! Tin nhắn có thể chưa được lưu.");
+        }
     };
 
-    const sendGroupMessage = (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => {
-        setDb(prev => {
-            const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
-            const newMsg = { id: `gmsg_${Date.now()}`, user: { id: user.id, name: user.name, role: user.role }, text, timestamp: new Date(), isSOS: metadata?.isSOS, sosStatus: metadata?.isSOS ? 'PENDING' : undefined, isWhisper: metadata?.isWhisper };
-            return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: [...msgs, newMsg] } };
-        });
+    // --- GROUP CHAT WITH MONGODB PERSISTENCE ---
+    const sendGroupMessage = async (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => {
+        const id = `gmsg_${Date.now()}`;
+        const newMsgPayload = {
+            id,
+            groupId,
+            user: { id: user.id, name: user.name, role: user.role },
+            text,
+            isSOS: metadata?.isSOS,
+            sosStatus: metadata?.isSOS ? 'PENDING' : undefined,
+            isWhisper: metadata?.isWhisper,
+            timestamp: new Date()
+        };
+
+        try {
+            setDb(prev => {
+                const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
+                return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: [...msgs, newMsgPayload] } };
+            });
+
+            await fetch(`${BACKEND_URL}/group-chat/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newMsgPayload)
+            });
+        } catch (e) {
+            console.error("Failed to send group message:", e);
+        }
     };
-    const joinGroup = (groupId: string, userId: string, inviteMsgId?: string) => {
-        setDb(prev => {
-            const groups = prev.STUDY_GROUPS.map(g => g.id === groupId && !g.members.includes(userId) ? { ...g, members: [...g.members, userId] } : g);
-            const updatedUsers = { ...prev.USERS, [userId]: { ...prev.USERS[userId], squadronId: groupId } };
-            let newChats = prev.CHAT_MESSAGES;
-            if (inviteMsgId) {
-                newChats = { ...prev.CHAT_MESSAGES };
-                for (const key in newChats) {
-                    newChats[key] = newChats[key].map(m => m.id === inviteMsgId ? { ...m, squadronInvite: { ...m.squadronInvite!, status: 'ACCEPTED' } } : m);
+
+    const joinGroup = async (groupId: string, userId: string, inviteMsgId?: string) => {
+        try {
+            setDb(prev => {
+                const groups = prev.STUDY_GROUPS.map(g => g.id === groupId && !g.members.includes(userId) ? { ...g, members: [...g.members, userId] } : g);
+                const updatedUsers = { ...prev.USERS, [userId]: { ...prev.USERS[userId], squadronId: groupId } };
+                let newChats = prev.CHAT_MESSAGES;
+                if (inviteMsgId) {
+                    newChats = { ...prev.CHAT_MESSAGES };
+                    for (const key in newChats) {
+                        newChats[key] = newChats[key].map(m => m.id === inviteMsgId ? { ...m, squadronInvite: { ...m.squadronInvite!, status: 'ACCEPTED' } } : m);
+                    }
                 }
-            }
-            return { ...prev, STUDY_GROUPS: groups, USERS: updatedUsers, CHAT_MESSAGES: newChats };
-        });
+                return { ...prev, STUDY_GROUPS: groups, USERS: updatedUsers, CHAT_MESSAGES: newChats };
+            });
+
+            await fetch(`${BACKEND_URL}/groups/${groupId}/join`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
+            });
+
+        } catch (e) {
+            console.error("Failed to join group:", e);
+        }
     };
-    const createGroup = (name: string, creatorId: string) => {
-        const newGroup = { id: `g_${Date.now()}`, name, members: [creatorId] };
-        setDb(prev => ({ 
-            ...prev, 
-            STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
-            USERS: { ...prev.USERS, [creatorId]: { ...prev.USERS[creatorId], squadronId: newGroup.id } }
-        }));
+
+    const createGroup = async (name: string, creatorId: string) => {
+        const id = `g_${Date.now()}`;
+        const newGroup = { id, name, members: [creatorId] };
+        try {
+            setDb(prev => ({ 
+                ...prev, 
+                STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
+                USERS: { ...prev.USERS, [creatorId]: { ...prev.USERS[creatorId], squadronId: id } }
+            }));
+
+            await fetch(`${BACKEND_URL}/groups`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newGroup)
+            });
+        } catch (e) {
+            console.error("Failed to create group:", e);
+        }
     };
 
     const createRaidParty = (name: string, creatorId: string, memberIds: string[], bossName: string) => {
         const groupId = `g_raid_${Date.now()}`;
-        const newGroup: StudyGroup = { 
-            id: groupId, 
-            name, 
-            members: [creatorId, ...memberIds],
-            mission: { id: `mis_raid_${Date.now()}`, title: `Raid: ${bossName}`, target: 1, current: 0, reward: 500, type: 'boss_fight' } 
-        };
-        const systemMsg: GroupChatMessage = {
-            id: `sys_raid_${Date.now()}`,
-            user: { id: 'system', name: 'System', role: 'ADMIN' },
-            text: `⚔️ RAID PARTY STARTED!\n\nTarget: **${bossName}**\n\nTất cả thành viên hãy phối hợp để tiêu diệt Boss (hoàn thành bài tập) trước khi hết giờ!`,
-            timestamp: new Date()
-        };
-        setDb(prev => ({
-            ...prev,
-            STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
-            GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: [systemMsg] }
-        }));
+        createGroup(name, creatorId); // Basic persistence
+        
+        const systemText = `⚔️ RAID PARTY STARTED!\n\nTarget: **${bossName}**\n\nTất cả thành viên hãy phối hợp để tiêu diệt Boss (hoàn thành bài tập) trước khi hết giờ!`;
+        const systemUser: User = { id: 'system', name: 'System', role: 'ADMIN', isLocked: false, apiKey: null, hasSeenOnboarding: true };
+        
+        setTimeout(() => {
+             sendGroupMessage(groupId, systemUser, systemText);
+        }, 500);
     };
 
-    const resolveSOS = (groupId: string, msgId: string, rescuerId: string) => {
-        setDb(prev => {
-            const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
-            const newMsgs = msgs.map(m => m.id === msgId ? { ...m, sosStatus: 'RESOLVED', rescuerName: prev.USERS[rescuerId]?.name || rescuerId } : m);
-            return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: newMsgs } };
-        });
+    const resolveSOS = async (groupId: string, msgId: string, rescuerId: string) => {
+        try {
+            const rescuerName = db.USERS[rescuerId]?.name || rescuerId;
+            
+            setDb(prev => {
+                const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
+                const newMsgs = msgs.map(m => m.id === msgId ? { ...m, sosStatus: 'RESOLVED', rescuerName } : m);
+                return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: newMsgs } };
+            });
+
+            await fetch(`${BACKEND_URL}/group-chat/${msgId}/resolve`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rescuerName })
+            });
+        } catch (e) {
+            console.error("Failed to resolve SOS:", e);
+        }
     };
 
     const processTrade = (msgId: string, buyerId: string) => {
@@ -540,39 +751,107 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
 
-    const createLearningPath = (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number) => {
+    // --- LEARNING PATH ---
+    const createLearningPath = async (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number): Promise<string> => {
         if (wagerAmount && wagerAmount > 0) { if (db.GAMIFICATION.diamonds < wagerAmount) throw new Error("Không đủ Kim Cương để đặt cược."); }
         const id = `lp_${Date.now()}`;
         const deadline = new Date(); deadline.setDate(deadline.getDate() + 7);
-        const newPath: LearningPath = { id, creatorId: userId, title, topic, createdAt: new Date().toISOString(), nodes, targetLevel: meta.level, goal: meta.goal, dailyCommitment: meta.time, wager: wagerAmount ? { amount: wagerAmount, deadline: deadline.toISOString(), isResolved: false } : undefined };
-        setDb(prev => {
-            let newGamification = prev.GAMIFICATION;
-            if (wagerAmount) { newGamification = { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds - wagerAmount }; }
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [id]: newPath }, GAMIFICATION: newGamification };
-        });
-        return id;
-    };
-    const assignLearningPath = (teacherName: string, studentIds: string[], pathData: any) => {
-        setDb(prev => {
-            const newPaths = { ...prev.LEARNING_PATHS };
-            const newNotifs = { ...prev.NOTIFICATIONS };
-            studentIds.forEach(studentId => {
-                const id = `lp_${Date.now()}_${studentId}`;
-                newPaths[id] = { ...pathData, id, creatorId: studentId, createdAt: new Date().toISOString() };
-                const notif: Notification = { id: `n_assign_${Date.now()}_${studentId}`, text: `👨‍🏫 Giáo viên ${teacherName} đã giao lộ trình học tập mới: "${pathData.title}"`, read: false, type: 'system', timestamp: new Date().toISOString() };
-                newNotifs[studentId] = [notif, ...(newNotifs[studentId] || [])];
+        const newPath: LearningPath = { 
+            id, creatorId: userId, title, topic, createdAt: new Date().toISOString(), 
+            nodes, targetLevel: meta.level, goal: meta.goal, dailyCommitment: meta.time, 
+            wager: wagerAmount ? { amount: wagerAmount, deadline: deadline.toISOString(), isResolved: false } : undefined 
+        };
+        
+        try {
+            const res = await fetch(`${BACKEND_URL}/paths`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newPath)
             });
-            return { ...prev, LEARNING_PATHS: newPaths, NOTIFICATIONS: newNotifs };
-        });
+
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.message || "Failed to save path to server");
+            }
+
+            setDb(prev => {
+                let newGamification = prev.GAMIFICATION;
+                if (wagerAmount) { newGamification = { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds - wagerAmount }; }
+                return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [id]: newPath }, GAMIFICATION: newGamification };
+            });
+
+            return id;
+        } catch (e: any) {
+            console.error("Failed to sync path creation:", e);
+            throw e;
+        }
     };
+
+    // --- UPDATED ASSIGN LEARNING PATH: ASYNC & AWAIT ---
+    const assignLearningPath = async (teacherName: string, studentIds: string[], pathData: any) => {
+        const newPaths: Record<string, LearningPath> = { ...db.LEARNING_PATHS };
+        const newNotifs: Record<string, Notification[]> = { ...db.NOTIFICATIONS };
+
+        // Use Promise.all to ensure all backend requests complete
+        const promises = studentIds.map(async (studentId) => {
+            const id = `lp_${Date.now()}_${studentId}`;
+            const assignedPath = { ...pathData, id, creatorId: studentId, createdAt: new Date().toISOString() };
+            
+            // Optimistic update objects (Note: mutating newPaths locally is safe here before setDb)
+            newPaths[id] = assignedPath;
+            
+            const notif: Notification = { 
+                id: `n_assign_${Date.now()}_${studentId}`, 
+                text: `👨‍🏫 Giáo viên ${teacherName} đã giao lộ trình học tập mới: "${pathData.title}"`, 
+                read: false, 
+                type: 'system', 
+                timestamp: new Date().toISOString() 
+            };
+            
+            // Handle array immutability for notifications
+            const currentNotifs = newNotifs[studentId] || [];
+            newNotifs[studentId] = [notif, ...currentNotifs];
+
+            // Backend Sync
+            try {
+                await fetch(`${BACKEND_URL}/paths`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(assignedPath)
+                });
+            } catch (e) {
+                console.error(`Failed to assign path to ${studentId}:`, e);
+                // Optionally handle error (e.g. revert optimistic update), but keeping simple for now
+            }
+        });
+
+        await Promise.all(promises);
+
+        setDb(prev => ({ 
+            ...prev, 
+            LEARNING_PATHS: newPaths, 
+            NOTIFICATIONS: newNotifs 
+        }));
+    };
+
     const updateNodeProgress = (pathId: string, nodeId: string, data: Partial<LearningNode>) => {
         setDb(prev => {
             const path = prev.LEARNING_PATHS[pathId];
             if (!path) return prev;
             const newNodes = path.nodes.map(n => n.id === nodeId ? { ...n, ...data } : n);
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } } };
+            const updatedPath = { ...path, nodes: newNodes };
+            
+            // Backend Sync
+            fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedPath)
+            });
+
+            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
+
     const unlockNextNode = (pathId: string, nodeId: string) => {
         setDb(prev => {
             const path = prev.LEARNING_PATHS[pathId];
@@ -582,26 +861,61 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const newNodes = [...path.nodes];
                 newNodes[index] = { ...newNodes[index], isCompleted: true };
                 newNodes[index + 1] = { ...newNodes[index + 1], isLocked: false };
-                return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } } };
+                const updatedPath = { ...path, nodes: newNodes };
+                
+                // Backend Sync
+                fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedPath)
+                });
+
+                return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
             }
             const newNodes = [...path.nodes];
             newNodes[index] = { ...newNodes[index], isCompleted: true };
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } } };
+            const updatedPath = { ...path, nodes: newNodes };
+            
+            fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedPath)
+            });
+
+            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
+
     const extendLearningPath = (pathId: string, newNodes: LearningNode[]) => {
         setDb(prev => {
             const path = prev.LEARNING_PATHS[pathId];
             if (!path) return prev;
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: [...path.nodes, ...newNodes] } } };
+            const updatedPath = { ...path, nodes: [...path.nodes, ...newNodes] };
+            
+            fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedPath)
+            });
+
+            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
+
     const skipLearningPath = (userId: string, pathId: string) => {
         setDb(prev => {
             const path = prev.LEARNING_PATHS[pathId];
             if (!path) return prev;
             const newNodes = path.nodes.map(n => ({ ...n, isLocked: false, isCompleted: true }));
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } } };
+            const updatedPath = { ...path, nodes: newNodes };
+
+            fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedPath)
+            });
+
+            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
 
@@ -632,35 +946,72 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (e) { console.error(e); }
     };
 
-    const archiveCompletedTasks = (userId: string) => {
-        // Logic sync sau này
-    };
+    const archiveCompletedTasks = (userId: string) => { };
 
+    // --- ASSIGNMENT & QUIZ CREATION (WITH PERSISTENCE) ---
     const createFileAssignment = (title: string, courseId: string) => {
         const id = `ass_file_${Date.now()}`;
+        const newAssignment: Assignment = { id, courseId, title, type: 'file', createdAt: new Date().toISOString() };
+        
+        // Optimistic Update
         setDb(prev => ({
             ...prev,
-            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: { id, courseId, title, type: 'file', createdAt: new Date().toISOString() } },
+            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment },
             FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] }
         }));
+
+        // Persist
+        fetch(`${BACKEND_URL}/assignments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newAssignment)
+        });
     };
+
     const createQuizAssignment = (title: string, courseId: string, questions: QuizQuestion[]) => {
         const assignId = `ass_quiz_${Date.now()}`;
         const quizId = `qz_${Date.now()}`;
+        const newAssignment: Assignment = { id: assignId, courseId, title, type: 'quiz', quizId, createdAt: new Date().toISOString() };
+        const newQuiz = { id: quizId, questions, title };
+
+        // Optimistic Update
         setDb(prev => ({
             ...prev,
-            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [assignId]: { id: assignId, courseId: 'SELF', title, type: 'quiz', quizId, createdAt: new Date().toISOString() } },
-            QUIZZES: { ...prev.QUIZZES, [quizId]: { id: quizId, questions, title } },
+            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [assignId]: newAssignment },
+            QUIZZES: { ...prev.QUIZZES, [quizId]: newQuiz },
             QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: {} }
         }));
+
+        // Persist Assignment
+        fetch(`${BACKEND_URL}/assignments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newAssignment)
+        });
+
+        // Persist Quiz
+        fetch(`${BACKEND_URL}/quizzes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newQuiz)
+        });
     };
+
     const createBossChallenge = (courseId: string, title: string, description: string, xp: number) => {
         const id = `ass_boss_${Date.now()}`;
+        const newAssignment: Assignment = { id, courseId, title, type: 'file', createdAt: new Date().toISOString(), rank: 'S', isBoss: true, rewardXP: xp, description: description };
+        
         setDb(prev => ({
             ...prev,
-            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: { id, courseId, title, type: 'file', createdAt: new Date().toISOString(), rank: 'S', isBoss: true, rewardXP: xp, description: description } },
+            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment },
             FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] }
         }));
+
+        fetch(`${BACKEND_URL}/assignments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newAssignment)
+        });
     };
 
     const sendIntervention = (assignmentId: string, questionId: string, note: string, studentIds: string[]) => {
@@ -673,10 +1024,109 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { ...prev, NOTIFICATIONS: newNotifs };
         });
     };
-    const adminCreateCourse = (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => {
-        const courseId = `CS${Math.floor(Math.random() * 900) + 100}`;
-        // Logic thực tế cần lưu vào MongoDB Course model (Sẽ implement ở server route sau này)
+    
+    // --- ADMIN CREATE COURSE WITH PERSISTENCE ---
+    const adminCreateCourse = async (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => {
+        const courseId = `CS_${Date.now()}`;
+        const mappedModules = [];
+
+        try {
+            // Loop through generated modules
+            for (const mod of modules) {
+                const modId = `m_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                const items = [];
+
+                for (const item of mod.items) {
+                    const itemId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                    
+                    if (item.type.includes('lesson')) {
+                        // Create Lesson Content
+                        const lessonData = {
+                            id: itemId,
+                            courseId: courseId,
+                            title: item.title,
+                            type: (item.type === 'lesson_video' ? 'video' : 'text') as 'video' | 'text',
+                            content: item.contentOrDescription
+                        };
+                        
+                        await fetch(`${BACKEND_URL}/lessons`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(lessonData)
+                        });
+
+                        items.push({ type: 'lesson', id: itemId });
+                        
+                        // Local State Update for Lesson (Optimistic/Immediate)
+                        setDb(prev => ({
+                            ...prev,
+                            LESSONS: { ...prev.LESSONS, [itemId]: lessonData }
+                        }));
+
+                    } else {
+                        // Create Assignment
+                        const assignmentData = {
+                            id: itemId,
+                            courseId: courseId,
+                            title: item.title,
+                            type: (item.type === 'assignment_quiz' ? 'quiz' : 'file') as 'file' | 'quiz',
+                            description: item.contentOrDescription,
+                            createdAt: new Date().toISOString()
+                        };
+
+                        await fetch(`${BACKEND_URL}/assignments`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(assignmentData)
+                        });
+
+                        items.push({ type: 'assignment', id: itemId });
+
+                        // Local State Update for Assignment
+                        setDb(prev => ({
+                            ...prev,
+                            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [itemId]: assignmentData },
+                            // Initialize submissions
+                            FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [itemId]: [] },
+                            // Initialize quiz if quiz
+                            ...(item.type === 'assignment_quiz' ? {
+                                QUIZZES: { ...prev.QUIZZES, [itemId]: { id: `qz_${itemId}`, title: item.title, questions: [] } },
+                                QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [`qz_${itemId}`]: {} }
+                            } : {})
+                        }));
+                    }
+                }
+                mappedModules.push({ id: modId, name: mod.title, items });
+            }
+
+            // Create Course Document
+            const courseData = {
+                id: courseId,
+                name: name,
+                teacher: teacherName,
+                defaultPersona: defaultPersona,
+                modules: mappedModules
+            };
+
+            await fetch(`${BACKEND_URL}/courses`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(courseData)
+            });
+
+            // Update Local State for Course & Structure
+            setDb(prev => ({
+                ...prev,
+                COURSES: [...prev.COURSES, { id: courseId, name, teacher: teacherName, defaultPersona }],
+                COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules: mappedModules } }
+            }));
+
+        } catch (error) {
+            console.error("Error creating course:", error);
+            throw error;
+        }
     };
+
     const generateArchive = async (apiKey: string, type: 'course'|'squadron', id: string, name: string): Promise<string> => {
         let data: any = {};
         if (type === 'course') { const course = db.COURSES.find(c => c.id === id); data = { course, structure: db.COURSE_STRUCTURE[id] }; } else { const group = db.STUDY_GROUPS.find(g => g.id === id); data = { group, messages: db.GROUP_CHAT_MESSAGES[id] }; }
@@ -807,7 +1257,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 };
                 setUser(loggedUser);
                 setError(null);
-                // SAU KHI LOGIN, TẢI DỮ LIỆU CÁ NHÂN
+                // SAU KHI LOGIN, TẢI DỮ LIỆU CÁ NHÂN (bao gồm Chat)
                 await fetchUserData(loggedUser.id);
                 navigate('dashboard');
             } else {

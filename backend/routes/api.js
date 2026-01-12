@@ -13,12 +13,51 @@ import GroupMessage from '../models/GroupMessage.js';
 import LearningPath from '../models/LearningPath.js';
 import Quiz from '../models/Quiz.js'; // NEW
 import QuizSubmission from '../models/QuizSubmission.js'; // NEW
+import User from '../models/User.js'; // Need User model for heartbeat
 
 const router = express.Router();
 
 // --- AUTH ---
 router.post('/auth/login', loginUser);
 router.post('/auth/register', registerUser);
+
+// --- HEARTBEAT & USERS (PRESENCE SYSTEM) ---
+router.post('/users/heartbeat', async (req, res) => {
+    try {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ message: "UserId required" });
+
+        // Update lastActiveAt to now
+        const user = await User.findOneAndUpdate(
+            { id: userId }, 
+            { lastActiveAt: new Date() },
+            { new: true }
+        );
+
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // Return the "Online Token" status
+        res.json({ 
+            status: 'online', 
+            serverTime: new Date(), 
+            lastActive: user.lastActiveAt,
+            token: "PRESENCE_ACK_ONLINE" // The requested token
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+router.get('/users', async (req, res) => {
+    try {
+        // Fetch all users to display contacts list
+        // Mongoose virtual 'isOnline' will be calculated automatically based on lastActiveAt
+        const users = await User.find({}).select('-password'); 
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
 
 // --- AI ---
 router.post('/ai/generate', generateText);

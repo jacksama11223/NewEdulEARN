@@ -207,6 +207,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 subMap[s.quizId][s.studentId] = s;
             });
 
+            // 6. FETCH ALL USERS (FOR CONTACTS & STATUS)
+            // This is important to get the current isOnline status of everyone
+            const usersRes = await fetch(`${BACKEND_URL}/users`);
+            const usersData: any[] = await usersRes.json();
+            const usersMap: Record<string, User> = {};
+            usersData.forEach(u => {
+                usersMap[u.id] = {
+                    id: u.id,
+                    name: u.name,
+                    role: u.role,
+                    isLocked: u.isLocked,
+                    apiKey: null, // Don't expose keys broadly
+                    squadronId: u.squadronId,
+                    hasSeenOnboarding: u.hasSeenOnboarding,
+                    // Inject dynamic online status from backend (calculated by virtual)
+                    isOnline: u.isOnline 
+                } as User;
+            });
+
             setDb(prev => ({
                 ...prev,
                 COURSES: [...prev.COURSES, ...coursesList.filter(nc => !prev.COURSES.some(ec => ec.id === nc.id))], // Merge without dupes
@@ -214,7 +233,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 LESSONS: { ...prev.LESSONS, ...lessonsMap },
                 ASSIGNMENTS: { ...prev.ASSIGNMENTS, ...assignMap },
                 QUIZZES: { ...prev.QUIZZES, ...quizMap },
-                QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, ...subMap }
+                QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, ...subMap },
+                USERS: { ...prev.USERS, ...usersMap } // Merge users to update status
             }));
         } catch (e) {
             console.error("Failed to fetch global data:", e);
@@ -225,6 +245,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     useEffect(() => {
         fetchGlobalData();
     }, [fetchGlobalData]);
+
+    // --- REFRESH USER STATUS LOOP ---
+    // Polling mechanism to keep "isOnline" statuses updated for contacts
+    useEffect(() => {
+        const interval = setInterval(() => {
+            fetch(`${BACKEND_URL}/users`)
+                .then(res => res.json())
+                .then((usersData: any[]) => {
+                    const usersMap: Record<string, User> = {};
+                    usersData.forEach(u => {
+                        usersMap[u.id] = {
+                            id: u.id,
+                            name: u.name,
+                            role: u.role,
+                            isLocked: u.isLocked,
+                            apiKey: null,
+                            squadronId: u.squadronId,
+                            hasSeenOnboarding: u.hasSeenOnboarding,
+                            isOnline: u.isOnline
+                        } as User;
+                    });
+                    setDb(prev => ({ ...prev, USERS: { ...prev.USERS, ...usersMap } }));
+                })
+                .catch(e => console.error("Status sync error:", e));
+        }, 30000); // Check every 30s
+
+        return () => clearInterval(interval);
+    }, []);
 
     // --- SYNC WITH BACKEND ---
     const fetchUserData = useCallback(async (userId: string) => {
@@ -1271,6 +1319,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const logout = () => { setUser(null); navigate('dashboard'); };
     const isLocked = user?.isLocked || false;
+
+    // --- HEARTBEAT LOOP ---
+    // Sends a pulse to the server every 30s if user is logged in
+    useEffect(() => {
+        if (!user) return;
+
+        const heartbeat = () => {
+            fetch(`${BACKEND_URL}/users/heartbeat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: user.id })
+            }).catch(e => console.error("Heartbeat failed", e));
+        };
+
+        // Initial call
+        heartbeat();
+
+        const interval = setInterval(heartbeat, 30000); // 30 seconds
+        return () => clearInterval(interval);
+    }, [user]);
 
     return (
         <AuthContext.Provider value={{ user, isLocked, login, logout, error }}>

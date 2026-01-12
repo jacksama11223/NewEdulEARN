@@ -783,10 +783,14 @@ const ChatPage: React.FC = () => {
                         <button
                             key={contact.id}
                             onClick={() => setSelectedUserId(contact.id)}
-                            className={`w-full p-3 rounded-xl flex items-center gap-3 transition-colors ${selectedUserId === contact.id ? 'bg-blue-600/20 border border-blue-500/50' : 'hover:bg-white/5 border border-transparent'}`}
+                            className={`w-full p-3 rounded-xl flex items-center gap-3 transition-colors relative ${selectedUserId === contact.id ? 'bg-blue-600/20 border border-blue-500/50' : 'hover:bg-white/5 border border-transparent'}`}
                         >
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-600 flex items-center justify-center font-bold text-white">
-                                {contact.name.charAt(0)}
+                            <div className="relative">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-600 flex items-center justify-center font-bold text-white">
+                                    {contact.name.charAt(0)}
+                                </div>
+                                {/* Online Status Indicator */}
+                                <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-black ${contact.isOnline ? 'bg-green-500' : 'bg-gray-500'}`} title={contact.isOnline ? "Online" : "Offline"}></div>
                             </div>
                             <div className="text-left">
                                 <p className={`font-bold text-sm ${selectedUserId === contact.id ? 'text-blue-300' : 'text-gray-200'}`}>{contact.name}</p>
@@ -808,7 +812,7 @@ const ChatPage: React.FC = () => {
                     <>
                         <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
                             <h3 className="font-bold text-white flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                <span className={`w-2 h-2 rounded-full ${db.USERS[selectedUserId]?.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></span>
                                 {db.USERS[selectedUserId]?.name}
                             </h3>
                             <button 

@@ -10,6 +10,7 @@ export interface User {
   apiKey: string | null;
   squadronId?: string;
   hasSeenOnboarding: boolean;
+  isOnline?: boolean;
 }
 
 export interface Course {

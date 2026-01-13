@@ -588,24 +588,23 @@ const LearningNodeStudyPage: React.FC<LearningNodeStudyPageProps> = ({ pathId, n
         // --- RENDER LOGIC FOR ARRANGE_WORDS & FILL_GAP (Word Bank Style) ---
         if (q.type === 'arrange_words' || q.type === 'fill_gap') {
             const selectedWords = (examAnswers[q.id] || "").split(' ').filter(Boolean);
-            // Available words are options excluding already selected indices?
-            // Actually options are strings. We need to track *which instances* are selected if duplicates exist.
-            // For simplicity, we just use string matching or we assume options are unique enough or we handle selection by index.
-            // Let's implement robust selection by index. But `examAnswers` stores string.
-            // Let's re-parse options.
-            const allOptions = q.options || [];
             
-            // To handle duplicates correctly, we need to know *which* option index is used.
-            // But our current state stores "Word1 Word2".
-            // Let's change `examAnswers` storage strategy locally? No, stick to string for compatibility.
-            // UI Trick: Filter out the *first instance* of a word found in selectedWords when rendering the bank.
-            
-            // Helper to determine available bank items
+            // --- CRITICAL FIX: ENSURE WORD BANK HAS ITEMS ---
+            // If API didn't return options, generate them from correct answer
+            let bankOptions: string[] = [];
+            if (q.options && q.options.length > 0) {
+                bankOptions = q.options;
+            } else {
+                // FALLBACK: Generate shuffled words from correct answer
+                bankOptions = q.correctAnswer.split(' ').sort(() => 0.5 - Math.random());
+            }
+
+            // Logic to disable used words in bank
             const getAvailableBankItems = () => {
                 const usedCounts: Record<string, number> = {};
                 selectedWords.forEach(w => usedCounts[w] = (usedCounts[w] || 0) + 1);
                 
-                return allOptions.map((opt, idx) => {
+                return bankOptions.map((opt, idx) => {
                     const isUsed = (usedCounts[opt] || 0) > 0;
                     if (isUsed) usedCounts[opt]--; // Decrement available count
                     return { text: opt, index: idx, disabled: isUsed };

@@ -116,8 +116,8 @@ export const callGeminiApiWithSchema = async (
 // --- IMPLEMENTED FUNCTIONS ---
 
 export const generateNodeFlashcards = async (apiKey: string, nodeTitle: string, nodeDesc: string): Promise<Flashcard[]> => {
-    // OPTIMIZATION: Limit strictly to 10 cards. Truncate description.
-    const prompt = `Generate exactly 10 flashcards for learning node: ${nodeTitle}.
+    // OPTIMIZATION: Updated to 30 items as requested.
+    const prompt = `Generate exactly 30 flashcards for learning node: ${nodeTitle}.
     Description Context: ${nodeDesc.substring(0, 500)}
     
     Rules:
@@ -143,19 +143,23 @@ export const generateNodeFlashcards = async (apiKey: string, nodeTitle: string, 
         required: ["flashcards"]
     };
 
-    // Use Thinking Mode here for QUALITY content, but limit tokens via backend config if possible
-    // Note: We keep useThinking=true for Study Phase as requested, but maybe disable for pure JSON speed if needed.
-    // Let's use false for Flashcards to be fast and avoid 429 on bulk generation.
+    // Note: Generating 30 items is heavy. Use Flash model (useThinking: false) for speed and to avoid timeouts.
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: false });
     return res.flashcards?.map((c: any, i: number) => ({...c, id: `fc_${Date.now()}_${i}`})) || [];
 };
 
 export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promise<ExamQuestion[]> => {
-    // Exam needs logic -> Use Thinking Mode
-    const prompt = `Generate exactly 5 exam questions for: ${nodeTitle}.
-    Include types: 'mcq' and 'fill_gap'.
-    For 'mcq', correctAnswer must be the index string "0", "1", "2", or "3".
-    Return JSON.`;
+    // Exam needs logic -> Updated to 20 questions. Added explicit instructions for arrange_words options.
+    const prompt = `Generate exactly 20 exam questions for: ${nodeTitle}.
+    Include types: 'mcq' (Multiple Choice), 'fill_gap' (Fill in the blank), and 'arrange_words' (Sentence Building).
+    
+    CRITICAL RULES:
+    1. For 'mcq': 'correctAnswer' must be the index string "0", "1", "2", or "3".
+    2. For 'arrange_words': 
+       - 'question' should be "Arrange the words to form a correct sentence".
+       - 'correctAnswer' should be the full correct sentence.
+       - 'options' MUST contain the individual words of the correct answer, randomly shuffled. You may add 1-2 distractor words.
+    3. Return JSON.`;
     
     const schema = {
         type: 'OBJECT',
@@ -166,7 +170,7 @@ export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promi
                     type: 'OBJECT',
                     properties: {
                         id: { type: 'STRING' },
-                        type: { type: 'STRING', enum: ["mcq", "fill_gap"] },
+                        type: { type: 'STRING', enum: ["mcq", "fill_gap", "arrange_words"] },
                         question: { type: 'STRING' },
                         options: { type: 'ARRAY', items: { type: 'STRING' }, nullable: true },
                         correctAnswer: { type: 'STRING' },
@@ -179,7 +183,8 @@ export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promi
         required: ["questions"]
     };
 
-    // Exams benefit from Thinking Mode
+    // Generating 20 complex questions benefits from Thinking Mode but can be slow. 
+    // We use Thinking Mode to ensure logical correctness of 'arrange_words' and distractors.
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: true });
     return res.questions || [];
 };

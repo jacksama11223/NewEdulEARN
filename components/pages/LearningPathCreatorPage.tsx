@@ -7,7 +7,7 @@ import DuolingoTree from '../common/DuolingoTree';
 import Modal from '../common/Modal';
 import type { LearningNode, PlacementTestQuestion, StudyGroup, User } from '../../types';
 
-type Step = 'TOPIC' | 'SURVEY' | 'LEVEL_CHOICE' | 'TEST' | 'GENERATING' | 'PREVIEW';
+type Step = 'TOPIC' | 'SURVEY' | 'LEVEL_CHOICE' | 'TEST' | 'GENERATING' | 'MANUAL_EDITOR' | 'PREVIEW';
 
 const LearningPathCreatorPage: React.FC = () => {
     const { user } = useContext(AuthContext)!;
@@ -36,7 +36,7 @@ const LearningPathCreatorPage: React.FC = () => {
     const [testQuestions, setTestQuestions] = useState<PlacementTestQuestion[]>([]);
     const [testAnswers, setTestAnswers] = useState<Record<string, number>>({});
 
-    // Step 4: Gen
+    // Step 4: Gen / Manual
     const [generatedNodes, setGeneratedNodes] = useState<LearningNode[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -137,6 +137,53 @@ const LearningPathCreatorPage: React.FC = () => {
             setIsLoading(false);
         }
     };
+
+    // --- MANUAL MODE HANDLERS ---
+    const handleEnterManualMode = () => {
+        // Init with 3 blank nodes
+        const initialNodes: LearningNode[] = [
+            { id: `man_${Date.now()}_1`, title: 'Bài 1: ...', description: 'Nhập mô tả', type: 'theory', isLocked: false, isCompleted: false, flashcardsMastered: 0 },
+            { id: `man_${Date.now()}_2`, title: 'Bài 2: ...', description: 'Nhập mô tả', type: 'practice', isLocked: true, isCompleted: false, flashcardsMastered: 0 },
+            { id: `man_${Date.now()}_3`, title: 'Bài 3: ...', description: 'Nhập mô tả', type: 'challenge', isLocked: true, isCompleted: false, flashcardsMastered: 0 },
+        ];
+        setGeneratedNodes(initialNodes);
+        setStep('MANUAL_EDITOR');
+    };
+
+    const addManualNode = () => {
+        const newNode: LearningNode = {
+            id: `man_${Date.now()}`,
+            title: 'Bài mới',
+            description: 'Mô tả ngắn gọn',
+            type: 'theory',
+            isLocked: true,
+            isCompleted: false,
+            flashcardsMastered: 0
+        };
+        setGeneratedNodes([...generatedNodes, newNode]);
+    };
+
+    const updateManualNode = (index: number, field: keyof LearningNode, value: any) => {
+        const newNodes = [...generatedNodes];
+        (newNodes[index] as any)[field] = value;
+        setGeneratedNodes(newNodes);
+    };
+
+    const deleteManualNode = (index: number) => {
+        if (generatedNodes.length <= 1) return;
+        setGeneratedNodes(generatedNodes.filter((_, i) => i !== index));
+    };
+
+    const moveManualNode = (index: number, direction: -1 | 1) => {
+        if (index + direction < 0 || index + direction >= generatedNodes.length) return;
+        const newNodes = [...generatedNodes];
+        const temp = newNodes[index];
+        newNodes[index] = newNodes[index + direction];
+        newNodes[index + direction] = temp;
+        setGeneratedNodes(newNodes);
+    };
+
+    // --- END MANUAL HANDLERS ---
 
     const handleSave = useCallback(async () => {
         if (!user || generatedNodes.length === 0) return;
@@ -261,15 +308,6 @@ const LearningPathCreatorPage: React.FC = () => {
 
     // -- Renders --
 
-    if (!isAiOk) {
-        return (
-            <div className="card p-8 text-center border border-yellow-700">
-                <h2 className="text-xl font-bold text-yellow-400">Dịch vụ AI đang bảo trì</h2>
-                <button onClick={() => navigate('assignment_hub')} className="btn btn-secondary mt-4">Quay lại</button>
-            </div>
-        );
-    }
-
     return (
         <div className="max-w-4xl mx-auto space-y-8">
             <button onClick={() => navigate('assignment_hub')} className="text-sm text-blue-400 hover:underline">&larr; Quay lại Hub</button>
@@ -280,6 +318,7 @@ const LearningPathCreatorPage: React.FC = () => {
                     step === 'TOPIC' ? '20%' : 
                     step === 'SURVEY' ? '40%' : 
                     step === 'LEVEL_CHOICE' ? '60%' : 
+                    step === 'MANUAL_EDITOR' ? '80%' :
                     step === 'TEST' ? '80%' : '100%'
                 }` }}></div>
             </div>
@@ -389,23 +428,86 @@ const LearningPathCreatorPage: React.FC = () => {
                 <div className="card p-8 animate-fade-in-up text-center space-y-8">
                     <h1 className="text-3xl font-bold text-gradient">3. Trình độ hiện tại?</h1>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <button onClick={() => { setLevel('Beginner'); handleGeneratePath('Beginner'); }} className="p-8 rounded-3xl border-2 border-gray-700 hover:border-blue-400 hover:bg-blue-900/10 transition-all group">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <button onClick={() => { setLevel('Beginner'); handleGeneratePath('Beginner'); }} className="p-6 rounded-3xl border-2 border-gray-700 hover:border-blue-400 hover:bg-blue-900/10 transition-all group">
                             <div className="text-5xl mb-4 group-hover:scale-110 transition-transform">🐣</div>
                             <h3 className="text-xl font-bold text-white">Mới bắt đầu</h3>
-                            <p className="text-gray-400 mt-2">Học từ con số 0.</p>
+                            <p className="text-gray-400 mt-2 text-sm">Học từ con số 0 (Auto AI).</p>
                         </button>
 
-                        <button onClick={handleStartTest} className="p-8 rounded-3xl border-2 border-gray-700 hover:border-purple-400 hover:bg-purple-900/10 transition-all group">
+                        <button onClick={handleStartTest} className="p-6 rounded-3xl border-2 border-gray-700 hover:border-purple-400 hover:bg-purple-900/10 transition-all group">
                             <div className="text-5xl mb-4 group-hover:scale-110 transition-transform">🧠</div>
-                            <h3 className="text-xl font-bold text-white">Đã biết chút ít?</h3>
-                            <p className="text-gray-400 mt-2">Làm bài test phân loại.</p>
+                            <h3 className="text-xl font-bold text-white">Test Đầu vào</h3>
+                            <p className="text-gray-400 mt-2 text-sm">Làm bài kiểm tra.</p>
+                        </button>
+
+                        {/* MANUAL MODE BUTTON */}
+                        <button onClick={handleEnterManualMode} className="p-6 rounded-3xl border-2 border-gray-700 hover:border-green-400 hover:bg-green-900/10 transition-all group">
+                            <div className="text-5xl mb-4 group-hover:scale-110 transition-transform">🔧</div>
+                            <h3 className="text-xl font-bold text-white">Soạn thủ công</h3>
+                            <p className="text-gray-400 mt-2 text-sm">Tự xây dựng cây kỹ năng.</p>
                         </button>
                     </div>
                     
-                    {/* Error display moved to here */}
                     {error && <div className="mt-4 p-3 bg-red-900/20 border border-red-500/50 rounded-lg text-red-300">{error}</div>}
                     {isLoading && <div className="mt-4"><LoadingSpinner size={6} /><p className="text-sm text-gray-400 mt-2">Đang xử lý...</p></div>}
+                </div>
+            )}
+
+            {/* MANUAL EDITOR STEP */}
+            {step === 'MANUAL_EDITOR' && (
+                <div className="card p-6 animate-fade-in-up">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-white">🔧 Trình soạn thảo Lộ trình</h2>
+                        <button onClick={addManualNode} className="btn btn-secondary text-xs">+ Thêm Bài học</button>
+                    </div>
+
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2 mb-6">
+                        {generatedNodes.map((node, idx) => (
+                            <div key={node.id} className="p-4 bg-gray-800 rounded-lg border border-gray-700 flex flex-col md:flex-row gap-4 items-start md:items-center group">
+                                <div className="flex flex-col items-center gap-1 mr-2 text-gray-500">
+                                    <button onClick={() => moveManualNode(idx, -1)} disabled={idx === 0} className="hover:text-white disabled:opacity-30">▲</button>
+                                    <span className="font-mono text-xs">{idx + 1}</span>
+                                    <button onClick={() => moveManualNode(idx, 1)} disabled={idx === generatedNodes.length - 1} className="hover:text-white disabled:opacity-30">▼</button>
+                                </div>
+
+                                <div className="flex-1 space-y-2 w-full">
+                                    <input 
+                                        type="text" 
+                                        className="form-input w-full"
+                                        placeholder="Tiêu đề bài học"
+                                        value={node.title}
+                                        onChange={e => updateManualNode(idx, 'title', e.target.value)}
+                                    />
+                                    <input 
+                                        type="text" 
+                                        className="form-input w-full text-xs text-gray-400"
+                                        placeholder="Mô tả ngắn"
+                                        value={node.description}
+                                        onChange={e => updateManualNode(idx, 'description', e.target.value)}
+                                    />
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <select 
+                                        className="form-select text-xs py-2"
+                                        value={node.type}
+                                        onChange={e => updateManualNode(idx, 'type', e.target.value)}
+                                    >
+                                        <option value="theory">📖 Lý thuyết</option>
+                                        <option value="practice">✏️ Bài tập</option>
+                                        <option value="challenge">👹 Boss</option>
+                                    </select>
+                                    <button onClick={() => deleteManualNode(idx)} className="p-2 text-red-400 hover:bg-red-900/20 rounded">🗑️</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="flex justify-between border-t border-gray-700 pt-4">
+                        <button onClick={() => setStep('LEVEL_CHOICE')} className="text-gray-400 hover:text-white">Quay lại</button>
+                        <button onClick={() => setStep('PREVIEW')} className="btn btn-primary px-8">Xem trước & Hoàn tất &rarr;</button>
+                    </div>
                 </div>
             )}
 

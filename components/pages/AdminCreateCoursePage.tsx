@@ -30,6 +30,23 @@ const AdminCreateCoursePage: React.FC = () => {
     // Track which module is currently regenerating
     const [regeneratingModuleIndex, setRegeneratingModuleIndex] = useState<number | null>(null);
 
+    // --- MANUAL START ACTION ---
+    const handleManualStart = () => {
+        setGeneratedStructure([
+            {
+                title: "Module 1: Tổng quan",
+                items: [
+                    {
+                        title: "Bài học giới thiệu",
+                        type: "lesson_text",
+                        contentOrDescription: "Chào mừng đến với khóa học..."
+                    }
+                ]
+            }
+        ]);
+        if (!courseName) setCourseName("Khóa học Mới (Thủ công)");
+    };
+
     // --- AI ACTIONS ---
 
     const handleGenerateSyllabus = async () => {
@@ -227,11 +244,11 @@ const AdminCreateCoursePage: React.FC = () => {
 
                 <div className="border-t border-gray-700 pt-6">
                     <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <span>🧠</span> Cấu hình AI
+                        <span>🧠</span> Cấu hình Nội dung
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Chủ đề (Topic)</label>
+                            <label className="block text-sm font-medium text-gray-300 mb-1">Chủ đề (Topic) - Dành cho AI</label>
                             <input type="text" className="form-input w-full" value={topic} onChange={e => setTopic(e.target.value)} placeholder="VD: Advanced Machine Learning" />
                         </div>
                         <div>
@@ -240,7 +257,7 @@ const AdminCreateCoursePage: React.FC = () => {
                         </div>
                     </div>
                     
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-wrap justify-between items-center gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-300 mb-1">Persona Mặc định</label>
                             <select className="form-select w-48 py-1" value={defaultPersona} onChange={e => setDefaultPersona(e.target.value)}>
@@ -250,13 +267,22 @@ const AdminCreateCoursePage: React.FC = () => {
                                 <option value="jester">Jester</option>
                             </select>
                         </div>
-                        <button 
-                            onClick={handleGenerateSyllabus} 
-                            disabled={isGenerating}
-                            className="btn btn-primary flex items-center gap-2"
-                        >
-                            {isGenerating ? <LoadingSpinner size={4} /> : '✨ Tạo Đề cương (Generate)'}
-                        </button>
+                        
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={handleManualStart} 
+                                className="btn btn-secondary flex items-center gap-2 border-green-500/50 text-green-300 hover:bg-green-900/20"
+                            >
+                                🔧 Soạn Thủ Công (Offline)
+                            </button>
+                            <button 
+                                onClick={handleGenerateSyllabus} 
+                                disabled={isGenerating}
+                                className="btn btn-primary flex items-center gap-2"
+                            >
+                                {isGenerating ? <LoadingSpinner size={4} /> : '✨ Tạo Đề cương (AI)'}
+                            </button>
+                        </div>
                     </div>
                     {error && <p className="text-red-400 mt-2">{error}</p>}
                 </div>

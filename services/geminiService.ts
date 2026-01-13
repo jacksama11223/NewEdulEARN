@@ -1,10 +1,28 @@
+
 import type { QuizQuestion, LearningNode, Flashcard, ExamQuestion, PlacementTestQuestion, GeneratedModule, RiddleData } from '../types';
 
-// SỬ DỤNG BIẾN MÔI TRƯỜNG CHO URL BACKEND
-// Khi chạy local, nó sẽ fallback về localhost:5000
-// Khi deploy, bạn cần set biến VITE_BACKEND_URL trong cấu hình deployment (Vercel/Netlify/Render)
-const BASE_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5000';
+// --- CONFIG URL BACKEND ---
+const getBackendUrl = () => {
+    // 1. Lấy URL từ biến môi trường
+    let url = (import.meta as any).env.VITE_BACKEND_URL;
+    
+    // 2. Nếu không có (đang chạy local), dùng localhost
+    if (!url) {
+        // Kiểm tra xem đang ở môi trường production hay dev
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            console.error("⚠️ CẢNH BÁO: Chưa cấu hình VITE_BACKEND_URL trên Vercel/Netlify. App sẽ cố kết nối localhost và có thể thất bại.");
+        }
+        url = 'http://localhost:5000';
+    }
+
+    // 3. Xóa dấu gạch chéo '/' ở cuối nếu có (để tránh lỗi //api)
+    return url.replace(/\/$/, "");
+};
+
+const BASE_URL = getBackendUrl();
 const BACKEND_URL = `${BASE_URL}/api`;
+
+console.log("🔗 GeminiService connecting to:", BACKEND_URL);
 
 // Generic Text Call -> Calls Backend
 export const callGeminiApi = async (

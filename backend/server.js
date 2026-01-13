@@ -16,6 +16,12 @@ const PORT = process.env.PORT || 5000;
 app.use(cors()); // Allow Frontend to access
 app.use(express.json({ limit: '50mb' })); // Allow large payloads (PDF/Images)
 
+// DEBUG LOGGING MIDDLEWARE
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
 // 3. Routes
 app.use('/api', apiRoutes);
 
@@ -25,6 +31,6 @@ app.get('/', (req, res) => {
 });
 
 // 5. Start
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });

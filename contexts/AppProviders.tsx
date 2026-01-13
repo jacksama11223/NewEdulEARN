@@ -1,13 +1,30 @@
+
 import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef, ReactNode } from 'react';
 import { MOCK_DATA } from '../data/mockData.ts';
 import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson } from '../types.ts';
 import { convertContentToFlashcards, generateLegacyArchiveContent } from '../services/geminiService.ts';
 
-// SỬ DỤNG BIẾN MÔI TRƯỜNG CHO URL BACKEND
-// Khi chạy local, nó sẽ fallback về localhost:5000
-// Khi deploy, bạn cần set biến VITE_BACKEND_URL trong cấu hình deployment
-const BASE_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5000';
+// --- CONFIG URL BACKEND ---
+const getBackendUrl = () => {
+    // 1. Lấy URL từ biến môi trường
+    let url = (import.meta as any).env.VITE_BACKEND_URL;
+    
+    // 2. Nếu không có (đang chạy local), dùng localhost
+    if (!url) {
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            console.error("⚠️ CẢNH BÁO: Chưa cấu hình VITE_BACKEND_URL trên Vercel/Netlify. App sẽ cố kết nối localhost và có thể thất bại.");
+        }
+        url = 'http://localhost:5000';
+    }
+
+    // 3. Xóa dấu gạch chéo '/' ở cuối nếu có (để tránh lỗi //api)
+    return url.replace(/\/$/, "");
+};
+
+const BASE_URL = getBackendUrl();
 const BACKEND_URL = `${BASE_URL}/api`;
+
+console.log("🔗 AppProviders connecting to:", BACKEND_URL);
 
 // --- CONTEXT DEFINITIONS ---
 // (Giữ nguyên các interface Context vì chúng không đổi)
@@ -167,6 +184,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             
             // 1. Fetch Courses (contains structure)
             const coursesRes = await fetch(`${BACKEND_URL}/courses`);
+            if (!coursesRes.ok) throw new Error("Failed to fetch courses");
             const coursesData: any[] = await coursesRes.json();
             
             const coursesList: Course[] = [];
@@ -185,24 +203,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             // 2. Fetch Lessons (Content)
             const lessonsRes = await fetch(`${BACKEND_URL}/lessons`);
+            if (!lessonsRes.ok) throw new Error("Failed to fetch lessons");
             const lessonsData: Lesson[] = await lessonsRes.json();
             const lessonsMap: Record<string, Lesson> = {};
             lessonsData.forEach(l => { lessonsMap[l.id] = l; });
 
             // 3. Fetch Assignments
             const assignRes = await fetch(`${BACKEND_URL}/assignments`);
+            if (!assignRes.ok) throw new Error("Failed to fetch assignments");
             const assignments: Assignment[] = await assignRes.json();
             const assignMap: Record<string, Assignment> = {};
             assignments.forEach(a => { assignMap[a.id] = a; });
 
             // 4. Fetch Quizzes
             const quizzesRes = await fetch(`${BACKEND_URL}/quizzes`);
+            if (!quizzesRes.ok) throw new Error("Failed to fetch quizzes");
             const quizzes: Quiz[] = await quizzesRes.json();
             const quizMap: Record<string, Quiz> = {};
             quizzes.forEach(q => { quizMap[q.id] = q; });
 
             // 5. Fetch Quiz Submissions
             const subRes = await fetch(`${BACKEND_URL}/quiz-submissions`);
+            if (!subRes.ok) throw new Error("Failed to fetch submissions");
             const submissions: QuizSubmission[] = await subRes.json();
             const subMap: Record<string, Record<string, QuizSubmission>> = {};
             // Group by QuizId then StudentId
@@ -214,6 +236,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // 6. FETCH ALL USERS (FOR CONTACTS & STATUS)
             // This is important to get the current isOnline status of everyone
             const usersRes = await fetch(`${BACKEND_URL}/users`);
+            if (!usersRes.ok) throw new Error("Failed to fetch users");
             const usersData: any[] = await usersRes.json();
             const usersMap: Record<string, User> = {};
             usersData.forEach(u => {
@@ -1384,7 +1407,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
         } catch (err) {
             console.error("Login API Error:", err);
-            setError("Cannot connect to server.");
+            setError("Cannot connect to server. Ensure BACKEND_URL is set correctly.");
         }
     };
 

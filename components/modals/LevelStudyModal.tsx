@@ -25,6 +25,9 @@ const getFontSize = (text: string) => {
     return 'text-base';
 };
 
+// OPTIMIZATION: Lower threshold to 10 to match single AI batch generation
+const MASTERY_THRESHOLD = 10;
+
 const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, pathId, node, isLastNode }) => {
     const { user } = useContext(AuthContext)!;
     const { db, updateNodeProgress, unlockNextNode, extendLearningPath } = useContext(DataContext)!;
@@ -54,9 +57,23 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
 
     // --- PHASE 1: FLASHCARDS ---
     const startFlashcards = async () => {
-        if (masteredCount >= 30) {
-            setPhase('GEN_EXAM');
-            return;
+        // Check if user already mastered enough to take exam
+        if (masteredCount >= MASTERY_THRESHOLD) {
+            const confirmReview = window.confirm("Bạn đã đủ điều kiện thi. Bạn có muốn học thêm từ vựng mới không?");
+            if (!confirmReview) {
+                setPhase('GEN_EXAM');
+                return;
+            }
+        }
+
+        // Use existing cards if available and not mastered
+        if (node.flashcards && node.flashcards.length > 0 && node.flashcards.some(c => (c.box || 0) < 1)) {
+             setFlashcards(node.flashcards);
+             setFlashcardQueue(node.flashcards.filter(c => (c.box || 0) < 1));
+             setPhase('STUDY_FLASHCARDS');
+             setCurrentCardIndex(0);
+             setIsFlipped(false);
+             return;
         }
 
         setPhase('GEN_FLASHCARDS');
@@ -64,9 +81,14 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         if (!apiKey) { setError("Vui lòng cấu hình API Key."); setPhase('START'); return; }
 
         try {
+            // JIT Generation: Generate only when user enters here
             const cards = await generateNodeFlashcards(apiKey, node.title, node.description);
+            
+            // Save generated cards to DB so we don't regenerate next time
+            updateNodeProgress(pathId, node.id, { flashcards: cards });
+            
             setFlashcards(cards);
-            setFlashcardQueue(cards); // Initialize queue
+            setFlashcardQueue(cards); 
             setPhase('STUDY_FLASHCARDS');
             setCurrentCardIndex(0);
             setIsFlipped(false);
@@ -97,19 +119,14 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         setIsFlipped(false);
         
         // Logic to proceed
-        if (newMasteredCount >= 30) {
-            alert("Chúc mừng! Bạn đã thuộc 30 thẻ. Mở khóa bài kiểm tra!");
+        if (newMasteredCount >= MASTERY_THRESHOLD) {
+            alert(`Chúc mừng! Bạn đã thuộc ${MASTERY_THRESHOLD} thẻ. Mở khóa bài kiểm tra!`);
             setPhase('GEN_EXAM');
             updateNodeProgress(pathId, node.id, { isExamUnlocked: true });
         } else if (nextQueue.length === 0) {
-             // Should not happen if we keep pushing hard cards back, but safety check
-             alert("Hết thẻ! Tạo thêm thẻ mới.");
+             alert("Hết thẻ! Đang tạo thêm thẻ mới...");
              startFlashcards(); 
         } else {
-            // If we removed a card, the current index might point to a new card naturally.
-            // If we moved to back, we need to ensure index doesn't overflow if queue shrank? 
-            // Actually, if we move to back, length stays same. If remove, length -1.
-            // Safest is to reset index to 0 if we modified the list structure significantly or just keep it 0 since we are consuming a queue.
             setCurrentCardIndex(0);
         }
     };
@@ -129,6 +146,7 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         if (!apiKey) { setError("Thiếu API Key."); return; }
 
         try {
+            // JIT Generation: Generate exam only when needed
             const questions = await generateNodeExam(apiKey, node.title);
             // Save questions to persistence
             updateNodeProgress(pathId, node.id, { examQuestions: questions });
@@ -147,13 +165,10 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
             const userAns = (examAnswers[q.id] || "").trim();
             const correct = q.correctAnswer.trim();
             
-            // ROBUST CHECKING LOGIC
             let isCorrect = false;
             if (q.type === 'mcq') {
-                // Ensure strict string index comparison ("0" vs "0")
                 isCorrect = String(userAns) === String(correct);
             } else {
-                // Text Normalization
                 const normalize = (s: string) => s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").replace(/\s{2,}/g," ");
                 isCorrect = normalize(userAns) === normalize(correct);
             }
@@ -165,7 +180,6 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         setExamScore(percentage);
         setPhase('RESULT');
         
-        // Save Score
         updateNodeProgress(pathId, node.id, { examScore: percentage });
 
         if (percentage >= 40) {
@@ -202,8 +216,8 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
             <div className="grid grid-cols-2 gap-4 max-w-md mx-auto">
                 <div className="card p-4 bg-gray-800 border-gray-700">
                     <p className="text-gray-400 text-sm">Flashcards</p>
-                    <p className={`text-2xl font-bold ${masteredCount >= 30 ? 'text-green-400' : 'text-yellow-400'}`}>
-                        {masteredCount} / 30
+                    <p className={`text-2xl font-bold ${masteredCount >= MASTERY_THRESHOLD ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {masteredCount} / {MASTERY_THRESHOLD}
                     </p>
                 </div>
                 <div className="card p-4 bg-gray-800 border-gray-700">
@@ -218,20 +232,19 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
                 <button 
                     onClick={startFlashcards} 
                     className="btn btn-primary w-full max-w-xs mx-auto"
-                    disabled={masteredCount >= 30}
                 >
-                    {masteredCount >= 30 ? '✅ Đã hoàn thành Flashcards' : '🧠 Học Flashcards (AI)'}
+                    {masteredCount >= MASTERY_THRESHOLD ? '🧠 Học thêm Flashcards (AI)' : '🧠 Bắt đầu Học (Tạo bởi AI)'}
                 </button>
                 
                 <button 
                     onClick={startExam} 
-                    className={`btn w-full max-w-xs mx-auto ${masteredCount >= 30 ? 'btn-primary bg-purple-600 hover:bg-purple-500' : 'btn-secondary opacity-50 cursor-not-allowed'}`}
-                    disabled={masteredCount < 30}
+                    className={`btn w-full max-w-xs mx-auto ${masteredCount >= MASTERY_THRESHOLD ? 'btn-primary bg-purple-600 hover:bg-purple-500' : 'btn-secondary opacity-50 cursor-not-allowed'}`}
+                    disabled={masteredCount < MASTERY_THRESHOLD}
                 >
-                    📝 Làm bài kiểm tra qua màn
+                    {masteredCount >= MASTERY_THRESHOLD ? '📝 Làm bài kiểm tra (Tạo bởi AI)' : `🔒 Khóa Kiểm tra (Cần ${MASTERY_THRESHOLD} từ)`}
                 </button>
             </div>
-            {masteredCount < 30 && <p className="text-xs text-yellow-500 mt-2">Thuộc 30 từ vựng để mở khóa bài kiểm tra.</p>}
+            {masteredCount < MASTERY_THRESHOLD && <p className="text-xs text-yellow-500 mt-2">Nội dung sẽ được AI tạo tự động khi bạn nhấn Bắt đầu.</p>}
         </div>
     );
 
@@ -241,7 +254,7 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
 
         return (
             <div className="flex flex-col items-center space-y-6 py-4">
-                <h3 className="text-lg font-semibold text-gray-300">Học từ vựng ({masteredCount}/30 Mastered)</h3>
+                <h3 className="text-lg font-semibold text-gray-300">Học từ vựng ({masteredCount}/{MASTERY_THRESHOLD})</h3>
                 <div 
                     className="relative w-full max-w-md h-64 cursor-pointer perspective-1000"
                     onClick={() => setIsFlipped(!isFlipped)}
@@ -373,8 +386,8 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
                         <div className="flex justify-center mb-4"><LoadingSpinner size={8} /></div>
                         <p className="text-gray-300 animate-pulse font-medium">
                             {phase === 'EXTENDING_PATH' ? 'Hệ thống đang nghiên cứu lộ trình nâng cao...' : 
-                             phase === 'GEN_FLASHCARDS' ? 'Hệ thống đang tải flashcard của bạn...' :
-                             'Hệ thống đang tải bài kiểm tra của bạn...'}
+                             phase === 'GEN_FLASHCARDS' ? 'AI đang soạn thẻ học cho bạn (Tiết kiệm Token)...' :
+                             'AI đang soạn đề thi kiểm tra...'}
                         </p>
                     </div>
                 )}

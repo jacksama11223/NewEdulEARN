@@ -95,10 +95,14 @@ export const callGeminiApiWithSchema = async (
 // --- IMPLEMENTED FUNCTIONS ---
 
 export const generateNodeFlashcards = async (apiKey: string, nodeTitle: string, nodeDesc: string): Promise<Flashcard[]> => {
-    // OPTIMIZATION: Reduced from 30 to 10 cards to save tokens
+    // OPTIMIZATION: Strictly limited to 10 cards to prevent timeouts and token exhaustion
     const prompt = `Generate exactly 10 flashcards for learning node: ${nodeTitle}.
-    Keep definitions very concise.
-    Return JSON: { "flashcards": [{ "front": string, "back": string }] }`;
+    Description: ${nodeDesc.substring(0, 300)}
+    
+    Rules:
+    1. Keep 'front' and 'back' VERY short and concise.
+    2. Focus on key terminology and definitions.
+    3. Return strictly JSON: { "flashcards": [{ "front": string, "back": string }] }`;
     
     const schema = {
         type: 'OBJECT',
@@ -118,12 +122,13 @@ export const generateNodeFlashcards = async (apiKey: string, nodeTitle: string, 
         required: ["flashcards"]
     };
 
-    const res = await callGeminiApiWithSchema(apiKey, prompt, schema);
+    // Disable thinking for speed/cost on simple generation
+    const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: false });
     return res.flashcards?.map((c: any, i: number) => ({...c, id: `fc_${Date.now()}_${i}`})) || [];
 };
 
 export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promise<ExamQuestion[]> => {
-    // OPTIMIZATION: Reduced from 20 to 5 questions to save tokens
+    // OPTIMIZATION: Limit to 5 questions
     const prompt = `Generate exactly 5 exam questions for: ${nodeTitle}.
     
     Include these types:
@@ -154,7 +159,6 @@ export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promi
         required: ["questions"]
     };
 
-    // Disabled thinking to save tokens/time for this simpler request
     const res = await callGeminiApiWithSchema(apiKey, prompt, schema, { useThinking: false });
     return res.questions || [];
 };
@@ -266,12 +270,18 @@ export const simplifyContent = async (apiKey: string, content: string): Promise<
 };
 
 export const generateLearningPathWithGemini = async (apiKey: string, topicOrContent: string, isContent: boolean, context: any): Promise<LearningNode[]> => {
-    // OPTIMIZATION: Truncate input heavily (500 chars) and limit to exactly 5 nodes.
+    // OPTIMIZATION: Massive truncation to save tokens and speed up initial tree generation
+    // We only need the structure (Title, Desc, Type), not the content.
     const safeInput = topicOrContent.substring(0, 500); 
     
-    const prompt = `Generate a mini learning path (exactly 5 nodes) for: "${safeInput}". 
+    const prompt = `Generate a learning path outline (exactly 5 nodes) for: "${safeInput}". 
     Level: ${context.level}. 
-    Keep descriptions very short (max 15 words).
+    
+    IMPORTANT:
+    1. Only generate Titles and short Descriptions.
+    2. DO NOT generate quizzes, flashcards, or detailed content yet.
+    3. Max 15 words per description.
+    
     Return strictly JSON: { "nodes": [{ "title": string, "description": string, "type": "theory"|"practice"|"challenge" }] }`;
     
     const schema = { 

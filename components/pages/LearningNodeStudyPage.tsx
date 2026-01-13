@@ -82,6 +82,10 @@ const LearningNodeStudyPage: React.FC<LearningNodeStudyPageProps> = ({ pathId, n
     const [masteredCount, setMasteredCount] = useState(0);
     const [isFlipped, setIsFlipped] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
+    // NEW: Flashcard Editing State
+    const [isEditingCard, setIsEditingCard] = useState(false);
+    const [editFront, setEditFront] = useState('');
+    const [editBack, setEditBack] = useState('');
 
     // Exam State (Duolingo Style)
     const [examQuestions, setExamQuestions] = useState<ExamQuestion[]>([]);
@@ -203,6 +207,37 @@ const LearningNodeStudyPage: React.FC<LearningNodeStudyPageProps> = ({ pathId, n
         await generateAndStartFlashcards('review');
     };
 
+    // --- FLASHCARD EDIT HANDLERS ---
+    const handleEditCardStart = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const currentCard = flashcardQueue[currentCardIndex];
+        setEditFront(currentCard.front);
+        setEditBack(currentCard.back);
+        setIsEditingCard(true);
+    };
+
+    const handleEditCardSave = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const currentCard = flashcardQueue[currentCardIndex];
+        const updatedCard = { ...currentCard, front: editFront, back: editBack };
+        
+        // Update Queue
+        const newQueue = [...flashcardQueue];
+        newQueue[currentCardIndex] = updatedCard;
+        setFlashcardQueue(newQueue);
+
+        // Update Persistence
+        const fullList = node.flashcards ? node.flashcards.map(c => c.id === updatedCard.id ? updatedCard : c) : [];
+        updateNodeProgress(pathId, node.id, { flashcards: fullList });
+
+        setIsEditingCard(false);
+    };
+
+    const handleEditCardCancel = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsEditingCard(false);
+    };
+
     const handleFlashcardResult = (difficulty: 'easy' | 'medium' | 'hard') => {
         const currentCard = flashcardQueue[currentCardIndex];
         const nextQueue = [...flashcardQueue];
@@ -243,6 +278,7 @@ const LearningNodeStudyPage: React.FC<LearningNodeStudyPageProps> = ({ pathId, n
         setSessionXp(prev => prev + xpGain);
         setFlashcardQueue(nextQueue);
         setIsFlipped(false);
+        setIsEditingCard(false); // Ensure edit mode is closed
         
         if (nextQueue.length === 0) {
              playSound('finish');
@@ -544,37 +580,88 @@ const LearningNodeStudyPage: React.FC<LearningNodeStudyPageProps> = ({ pathId, n
                 
                 {renderHeader(isReviewing ? "Ôn tập (Bảo trì)" : "Học từ mới", `${flashcardQueue.length} thẻ còn lại`)}
                 
-                <div className="flex-1 flex flex-col items-center justify-center perspective-1000 min-h-[400px] z-10">
+                <div className="flex-1 flex flex-col items-center justify-center perspective-1000 min-h-[400px] z-10 relative">
                     <div 
                         className="relative w-full h-80 cursor-pointer group perspective-1000"
                         onClick={() => setIsFlipped(!isFlipped)}
                     >
-                        <div className={`relative w-full h-full transition-all duration-500 transform-style-3d ${isFlipped ? 'rotate-y-180' : ''}`}>
-                            {/* Front */}
-                            <div className={`absolute inset-0 backface-hidden backdrop-blur-xl border rounded-[2rem] flex flex-col items-center justify-center p-8 shadow-[0_0_30px_rgba(0,0,0,0.3)] group-hover:scale-[1.02] transition-transform overflow-y-auto custom-scrollbar ${skinClass}`} style={{ backfaceVisibility: 'hidden' }}>
-                                <h3 className={`${getFontSize(card.front)} font-bold mb-4 text-center drop-shadow-md text-gray-200`}>{card.front}</h3>
-                                <p className="opacity-60 text-xs uppercase tracking-[0.2em] font-bold mt-auto animate-pulse">Chạm để lật</p>
-                                {card.box !== undefined && <span className="absolute top-4 right-4 text-xs opacity-50 font-mono">Box: {card.box}</span>}
+                        {isEditingCard ? (
+                            /* EDIT MODE UI */
+                            <div className="w-full h-full bg-gray-800 border-2 border-yellow-500/50 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl animate-fade-in cursor-default" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-widest text-center">🔧 Chỉnh sửa Thẻ</h3>
+                                
+                                <div className="flex-1 flex flex-col gap-1">
+                                    <label className="text-[10px] text-gray-400 uppercase font-bold">Mặt trước</label>
+                                    <textarea 
+                                        className="w-full bg-black/30 border border-gray-600 rounded p-2 text-white text-sm resize-none focus:border-yellow-500 outline-none flex-1"
+                                        value={editFront}
+                                        onChange={e => setEditFront(e.target.value)}
+                                    />
+                                </div>
+                                
+                                <div className="flex-1 flex flex-col gap-1">
+                                    <label className="text-[10px] text-gray-400 uppercase font-bold">Mặt sau</label>
+                                    <textarea 
+                                        className="w-full bg-black/30 border border-gray-600 rounded p-2 text-white text-sm resize-none focus:border-yellow-500 outline-none flex-1"
+                                        value={editBack}
+                                        onChange={e => setEditBack(e.target.value)}
+                                    />
+                                </div>
+
+                                <div className="flex gap-2 justify-end pt-2">
+                                    <button onClick={handleEditCardCancel} className="btn btn-xs btn-secondary">Hủy</button>
+                                    <button onClick={handleEditCardSave} className="btn btn-xs btn-primary bg-yellow-600 hover:bg-yellow-500 text-black font-bold">💾 Lưu</button>
+                                </div>
                             </div>
-                            {/* Back */}
-                            <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-blue-600 to-indigo-700 border border-white/20 rounded-[2rem] flex flex-col items-center justify-center p-8 shadow-[0_0_40px_rgba(37,99,235,0.4)] rotate-y-180 overflow-y-auto custom-scrollbar" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-                                <p className={`${getFontSize(card.back)} text-white font-medium text-center leading-relaxed drop-shadow-md`}>{card.back}</p>
+                        ) : (
+                            /* NORMAL VIEW MODE */
+                            <div className={`relative w-full h-full transition-all duration-500 transform-style-3d ${isFlipped ? 'rotate-y-180' : ''}`}>
+                                {/* Front */}
+                                <div className={`absolute inset-0 backface-hidden backdrop-blur-xl border rounded-[2rem] flex flex-col items-center justify-center p-8 shadow-[0_0_30px_rgba(0,0,0,0.3)] group-hover:scale-[1.02] transition-transform overflow-y-auto custom-scrollbar ${skinClass}`} style={{ backfaceVisibility: 'hidden' }}>
+                                    <h3 className={`${getFontSize(card.front)} font-bold mb-4 text-center drop-shadow-md text-gray-200`}>{card.front}</h3>
+                                    <p className="opacity-60 text-xs uppercase tracking-[0.2em] font-bold mt-auto animate-pulse">Chạm để lật</p>
+                                    {card.box !== undefined && <span className="absolute top-4 right-4 text-xs opacity-50 font-mono">Box: {card.box}</span>}
+                                    
+                                    {/* Edit Button Front */}
+                                    <button 
+                                        onClick={handleEditCardStart}
+                                        className="absolute top-4 left-4 p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-full transition-colors z-20"
+                                        title="Sửa nội dung"
+                                    >
+                                        ✏️
+                                    </button>
+                                </div>
+                                {/* Back */}
+                                <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-blue-600 to-indigo-700 border border-white/20 rounded-[2rem] flex flex-col items-center justify-center p-8 shadow-[0_0_40px_rgba(37,99,235,0.4)] rotate-y-180 overflow-y-auto custom-scrollbar" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                                    <p className={`${getFontSize(card.back)} text-white font-medium text-center leading-relaxed drop-shadow-md`}>{card.back}</p>
+                                    
+                                    {/* Edit Button Back */}
+                                    <button 
+                                        onClick={handleEditCardStart}
+                                        className="absolute top-4 left-4 p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition-colors z-20"
+                                        title="Sửa nội dung"
+                                    >
+                                        ✏️
+                                    </button>
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
 
-                <div className={`grid grid-cols-3 gap-4 mt-8 transition-opacity duration-300 z-10 ${isFlipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                    <button onClick={() => handleFlashcardResult('hard')} className="btn bg-red-500/20 text-red-200 border border-red-500/50 hover:bg-red-500 hover:text-white py-4 text-sm rounded-2xl backdrop-blur-md shadow-lg">
-                        Khó (Lặp lại)
-                    </button>
-                     <button onClick={() => handleFlashcardResult('medium')} className="btn bg-yellow-500/20 text-yellow-200 border border-yellow-500/50 hover:bg-yellow-500 hover:text-white py-4 text-sm rounded-2xl backdrop-blur-md shadow-lg">
-                        Bình thường
-                    </button>
-                    <button onClick={() => handleFlashcardResult('easy')} className="btn bg-green-500/20 text-green-200 border border-green-500/50 hover:bg-green-500 hover:text-white py-4 text-sm rounded-2xl backdrop-blur-md shadow-lg">
-                        Dễ (Qua)
-                    </button>
-                </div>
+                {!isEditingCard && (
+                    <div className={`grid grid-cols-3 gap-4 mt-8 transition-opacity duration-300 z-10 ${isFlipped ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        <button onClick={() => handleFlashcardResult('hard')} className="btn bg-red-500/20 text-red-200 border border-red-500/50 hover:bg-red-500 hover:text-white py-4 text-sm rounded-2xl backdrop-blur-md shadow-lg">
+                            Khó (Lặp lại)
+                        </button>
+                        <button onClick={() => handleFlashcardResult('medium')} className="btn bg-yellow-500/20 text-yellow-200 border border-yellow-500/50 hover:bg-yellow-500 hover:text-white py-4 text-sm rounded-2xl backdrop-blur-md shadow-lg">
+                            Bình thường
+                        </button>
+                        <button onClick={() => handleFlashcardResult('easy')} className="btn bg-green-500/20 text-green-200 border border-green-500/50 hover:bg-green-500 hover:text-white py-4 text-sm rounded-2xl backdrop-blur-md shadow-lg">
+                            Dễ (Qua)
+                        </button>
+                    </div>
+                )}
             </div>
         );
     };
@@ -596,7 +683,11 @@ const LearningNodeStudyPage: React.FC<LearningNodeStudyPageProps> = ({ pathId, n
                 bankOptions = q.options;
             } else {
                 // FALLBACK: Generate shuffled words from correct answer
-                bankOptions = q.correctAnswer.split(' ').sort(() => 0.5 - Math.random());
+                const correctWords = q.correctAnswer.split(' ');
+                // Add some basic distractors if API failed
+                const commonDistractors = ["is", "are", "the", "a", "an", "not", "very", "do", "does"];
+                const distractors = commonDistractors.sort(() => 0.5 - Math.random()).slice(0, 3);
+                bankOptions = [...correctWords, ...distractors].sort(() => 0.5 - Math.random());
             }
 
             // Logic to disable used words in bank

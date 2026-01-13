@@ -154,11 +154,11 @@ export const generateNodeExam = async (apiKey: string, nodeTitle: string): Promi
     Include types: 'mcq' (Multiple Choice), 'fill_gap' (Fill in the blank), and 'arrange_words' (Sentence Building).
     
     CRITICAL RULES:
-    1. For 'mcq': 'correctAnswer' must be the index string "0", "1", "2", or "3".
+    1. For 'mcq': 'correctAnswer' must be the index string "0", "1", "2", or "3". MUST provide 4 distinct 'options'.
     2. For 'arrange_words': 
        - 'question' should be "Arrange the words to form a correct sentence".
        - 'correctAnswer' should be the full correct sentence.
-       - 'options' MUST contain the individual words of the correct answer, randomly shuffled. You may add 1-2 distractor words.
+       - 'options' MUST contain the individual words of the correct answer PLUS 3-4 EXTRA DISTRACTOR WORDS (wrong words) mixed in. Shuffle them.
     3. Return JSON.`;
     
     const schema = {

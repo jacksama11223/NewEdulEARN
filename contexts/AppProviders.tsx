@@ -27,7 +27,6 @@ const BACKEND_URL = `${BASE_URL}/api`;
 console.log("🔗 AppProviders connecting to:", BACKEND_URL);
 
 // --- CONTEXT DEFINITIONS ---
-// (Giữ nguyên các interface Context vì chúng không đổi)
 
 export interface AuthContextType {
     user: User | null;
@@ -39,6 +38,9 @@ export interface AuthContextType {
 
 export interface DataContextType {
     db: Database;
+    // NEW: Method to sync user data immediately after login to prevent white screen
+    syncUserToDb: (user: User) => void; 
+
     setApiKey: (userId: string, key: string) => void;
     markLessonComplete: (userId: string, lessonId: string) => void;
     submitFileAssignment: (assignmentId: string, studentId: string, fileName: string) => void;
@@ -299,6 +301,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }, 30000); // Check every 30s
 
         return () => clearInterval(interval);
+    }, []);
+
+    // --- CRITICAL FIX: Sync User To DB immediately ---
+    // This prevents white screen after registration/login by manually injecting the user into the local DB state
+    const syncUserToDb = useCallback((user: User) => {
+        setDb(prev => {
+            // Merge gamification if available on user object (from backend response)
+            const userGamification = (user as any).gamification;
+            
+            return {
+                ...prev,
+                USERS: {
+                    ...prev.USERS,
+                    [user.id]: { ...user, isOnline: true }
+                },
+                // Initialize arrays to prevent undefined errors in widgets
+                LESSON_PROGRESS: {
+                    ...prev.LESSON_PROGRESS,
+                    [user.id]: prev.LESSON_PROGRESS[user.id] || []
+                },
+                NOTIFICATIONS: {
+                    ...prev.NOTIFICATIONS,
+                    [user.id]: prev.NOTIFICATIONS[user.id] || []
+                },
+                // Update global gamification state to reflect current user
+                GAMIFICATION: userGamification || prev.GAMIFICATION
+            };
+        });
     }, []);
 
     // --- SYNC WITH BACKEND (OPTIMIZED: PARALLEL FETCHING) ---
@@ -1301,7 +1331,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return (
         <DataContext.Provider value={{
-            db, setApiKey, markLessonComplete, submitFileAssignment, gradeFileSubmission, submitQuiz, updateQuizQuestions,
+            db, syncUserToDb, setApiKey, markLessonComplete, submitFileAssignment, gradeFileSubmission, submitQuiz, updateQuizQuestions,
             addDiscussionPost, addVideoNote, deleteVideoNote, runMockTest, toggleUserLock, sendAnnouncement, unlockAllUsers,
             registerUser, completeOnboarding, dismissAnnouncement, markNotificationRead, buyShopItem, equipShopItem, equipPet,
             checkDailyDiamondReward, unlockSecretReward, collectSpaceJunk, recycleSpaceJunk, awardXP, restoreStreak,
@@ -1371,7 +1401,7 @@ export const PageProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 };
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const { fetchUserData } = useContext(DataContext)!;
+    const { fetchUserData, syncUserToDb } = useContext(DataContext)!;
     const { navigate } = useContext(PageContext)!;
     
     const [user, setUser] = useState<User | null>(null);
@@ -1399,8 +1429,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 };
                 setUser(loggedUser);
                 setError(null);
+                
+                // --- CRITICAL: Manually inject user into DB state immediately ---
+                // This fixes the white screen issue by ensuring db.USERS[user.id] exists before React renders dashboard widgets
+                syncUserToDb(loggedUser);
+
+                // Fire async fetch for full profile (notes, etc.)
                 // No await here! Fire and forget to make UI responsive immediately
                 fetchUserData(loggedUser.id);
+                
                 navigate('dashboard');
             } else {
                 setError(data.message || "Login failed");

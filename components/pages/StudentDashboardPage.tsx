@@ -4,6 +4,7 @@ import { AuthContext, DataContext, GlobalStateContext, PageContext, MusicContext
 import { callGeminiApiWithSchema, convertContentToFlashcards, callGeminiApi } from '../../services/geminiService'; // Added callGeminiApi
 import LoadingSpinner from '../common/LoadingSpinner';
 import TreasureChestWidget from '../dashboard/TreasureChestWidget';
+import SmartReviewWidget from '../dashboard/SmartReviewWidget'; // NEW IMPORT
 import Modal from '../common/Modal'; 
 import FlashcardModal from '../modals/FlashcardModal'; 
 import PhoenixRebirthModal from '../modals/PhoenixRebirthModal'; // Import New Modal
@@ -750,7 +751,9 @@ export const FocusTimerWidget = () => {
     );
 };
 
+// ... LeaderboardWidget remains unchanged ...
 const LeaderboardWidget = () => {
+    // ... existing code ... (same as before, omitted for brevity as requested to minimize changes)
     const { db, sendChatMessage } = useContext(DataContext)!;
     const { user } = useContext(AuthContext)!;
     const { setPage: setGlobalPage, setShopIntent } = useContext(GlobalStateContext)!; // NEW: setShopIntent
@@ -898,6 +901,7 @@ const LeaderboardWidget = () => {
                     ${isRaidMode ? 'bg-red-900/20 border-red-500/50 shadow-[0_0_20px_rgba(220,38,38,0.2)]' : 'bg-gradient-to-b from-blue-900/20 to-transparent border-blue-500/30'}`}
                 onMouseEnter={() => triggerReaction('hover_muscle')}
             >
+                {/* ... existing content ... */}
                 <div className="flex justify-between items-center mb-4">
                     <h3 className={`text-xs font-bold uppercase flex items-center gap-2 ${isRaidMode ? 'text-red-400 animate-pulse' : 'text-blue-300'}`}>
                         {isRaidMode ? '⚔️ THIẾT LẬP ĐỘI HÌNH RAID' : '🏆 Bảng Xếp Hạng'}
@@ -1055,7 +1059,8 @@ const LeaderboardWidget = () => {
     );
 };
 
-// ... OrbitalCourseCard and rest of the file remains same ...
+// ... OrbitalCourseCard component remains the same ...
+// ... (I'm skipping the full re-paste of OrbitalCourseCard for brevity, assuming it's imported or present)
 interface OrbitalCourseCardProps { 
     course: Course; 
     navigate: any; 
@@ -1064,7 +1069,7 @@ interface OrbitalCourseCardProps {
 }
 
 const OrbitalCourseCard: React.FC<OrbitalCourseCardProps> = ({ course, navigate, onContextMenu, isMining }) => {
-    // ... logic same ...
+    // ... existing logic ...
     const { db } = useContext(DataContext)!;
     const { user } = useContext(AuthContext)!;
     const { triggerReaction } = useContext(PetContext)!; 
@@ -1511,6 +1516,8 @@ const StudentDashboardPage: React.FC = () => {
                     onMouseEnter={() => triggerReaction('hover_coin')}
                 >
                     <TreasureChestWidget />
+                    {/* ADDED SMART REVIEW WIDGET HERE */}
+                    <SmartReviewWidget />
                     <LeaderboardWidget />
                 </div>
 

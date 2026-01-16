@@ -1,10 +1,11 @@
 
+// ... (imports remain the same)
 import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef, ReactNode } from 'react';
 import { MOCK_DATA } from '../data/mockData.ts';
-import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson } from '../types.ts';
+import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson, ModuleItem, Module } from '../types.ts';
 import { convertContentToFlashcards, generateLegacyArchiveContent } from '../services/geminiService.ts';
 import { io, Socket } from 'socket.io-client';
-import { SKIN_CONFIG } from '../components/common/SkinConfig.ts'; // Import Skin Config
+import { SKIN_CONFIG } from '../components/common/SkinConfig.ts';
 
 // --- CONFIG URL BACKEND ---
 const getBackendUrl = () => {
@@ -21,38 +22,24 @@ const getBackendUrl = () => {
 const BASE_URL = getBackendUrl();
 const BACKEND_URL = `${BASE_URL}/api`;
 
-console.log("🔗 AppProviders connecting to:", BACKEND_URL);
-
-// --- SOUND ASSETS ---
+// ... (SOUNDS object remains the same)
 const SOUNDS = {
-    // Thông báo chung / Tin nhắn đến
     notification: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
-    // Gửi tin nhắn đi (nhẹ nhàng)
     sent: 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3', 
-    // Thành công (Nộp bài, Tạo thẻ, Lưu note) - Tiếng "Ting" nhẹ
     success: 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3', 
-    // Mua đồ / Tiêu tiền (Coin sound)
     cash: 'https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3',
-    // Lên cấp / Hoàn thành bài học (Fanfare nhỏ)
     level_up: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3',
-    // Lỗi / Xóa (Thud)
     error: 'https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3',
-    // Click UI (Mouse Interaction)
     click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
-    // Tiếng hover nhẹ hoặc tap vào phần tử nhỏ
     tap: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3',
-    // NEW: Tiếng ăn mừng lớn (Victory/Celebration) - Dùng khi đạt điểm cao, streak
     celebration: 'https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3', 
-    // NEW: Tiếng nhận thưởng (Pop/Collect) - Dùng khi nhặt rác, nhận quà
     reward: 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3',
-    // NEW: Cherry MX Black (Linear/Thocky) - Deeper sound, less high-pitch click
     keyboard_mech: 'https://assets.mixkit.co/active_storage/sfx/2364/2364-preview.mp3'
 };
 
 type SoundType = keyof typeof SOUNDS;
 
-// --- CONTEXT DEFINITIONS ---
-
+// ... (Interface definitions remain the same)
 export interface AuthContextType {
     user: User | null;
     isLocked: boolean;
@@ -66,12 +53,14 @@ export interface DataContextType {
     unreadCounts: { chat: number; group: number; alert: number }; 
     resetUnreadCount: (type: 'chat' | 'group' | 'alert') => void;
     
+    // SRS State
+    dueFlashcardsCount: number;
+    fetchDueFlashcards: (userId: string) => Promise<any[]>;
+    recordCardReview: (data: { cardId: string, rating: 'easy'|'medium'|'hard', sourceType: string, sourceId: string, nodeId?: string }) => Promise<void>;
+
     // NEW: Sound Player
     playSound: (type: SoundType) => void;
-
-    // NEW: Method to sync user data immediately after login to prevent white screen
     syncUserToDb: (user: User) => void; 
-
     setApiKey: (userId: string, key: string) => void;
     markLessonComplete: (userId: string, lessonId: string) => void;
     submitFileAssignment: (assignmentId: string, studentId: string, fileName: string) => void;
@@ -90,8 +79,6 @@ export interface DataContextType {
     completeOnboarding: (userId: string) => void;
     dismissAnnouncement: (id: string) => void;
     markNotificationRead: (userId: string, notifId: string) => void;
-    
-    // Gamification & Shop
     buyShopItem: (itemId: string) => void;
     equipShopItem: (itemId: string) => void;
     equipPet: (itemId: string) => void;
@@ -102,8 +89,6 @@ export interface DataContextType {
     awardXP: (amount: number) => void;
     restoreStreak: () => void;
     recordSpeedRunResult: (userId: string, score: number) => void;
-
-    // Chat & Social
     sendChatMessage: (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => void;
     sendGroupMessage: (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => void;
     deleteGroupMessage: (groupId: string, msgId: string) => void; 
@@ -113,17 +98,13 @@ export interface DataContextType {
     resolveSOS: (groupId: string, msgId: string, rescuerId: string) => void;
     processTrade: (msgId: string, buyerId: string) => void;
     sendReward: (teacherId: string, studentId: string, type: 'diamond' | 'item', value: number | string, message: string) => void;
-
-    // Study & Learning
     createFlashcardDeck: (userId: string, title: string, cards: Flashcard[]) => void;
-    deleteFlashcardDeck: (deckId: string) => void; // NEW
-    renameFlashcardDeck: (deckId: string, newTitle: string) => void; // NEW
+    deleteFlashcardDeck: (deckId: string) => void;
+    renameFlashcardDeck: (deckId: string, newTitle: string) => void;
     addFlashcardToDeck: (deckId: string, cards: Flashcard[]) => void;
     updateFlashcardInDeck: (deckId: string, card: Flashcard) => void;
     createStandaloneQuiz: (title: string, questions: QuizQuestion[]) => void;
     updateScratchpad: (userId: string, content: string) => void;
-    
-    // Notebook
     createPersonalNote: (userId: string, title: string, content: string, links?: any) => void;
     updatePersonalNote: (noteId: string, updates: Partial<PersonalNote>) => void;
     deletePersonalNote: (noteId: string) => void;
@@ -135,22 +116,16 @@ export interface DataContextType {
     unshareNote: (noteId: string) => void;
     unlockSharedNote: (noteId: string, userId: string) => void;
     addNoteComment: (noteId: string, userId: string, content: string, highlightedText?: string) => void;
-
-    // Learning Path
     createLearningPath: (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number) => Promise<string>;
     assignLearningPath: (teacherName: string, studentIds: string[], pathData: any) => Promise<void>; 
     updateNodeProgress: (pathId: string, nodeId: string, data: Partial<LearningNode>) => void;
     unlockNextNode: (pathId: string, nodeId: string) => void;
     extendLearningPath: (pathId: string, newNodes: LearningNode[]) => void;
     skipLearningPath: (userId: string, pathId: string) => void;
-
-    // Tasks
     addTask: (userId: string, text: string) => void;
     toggleTaskCompletion: (taskId: string, isCompleted: boolean) => void; 
     deleteTask: (taskId: string) => void;
     archiveCompletedTasks: (userId: string) => void;
-
-    // Admin & Teacher
     createFileAssignment: (title: string, courseId: string) => void;
     createQuizAssignment: (title: string, courseId: string, questions: QuizQuestion[]) => void;
     createBossChallenge: (courseId: string, title: string, description: string, xp: number) => void;
@@ -213,6 +188,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [db, setDb] = useState<Database>(MOCK_DATA);
     const [pdfStorage, setPdfStorage] = useState<Record<string, File>>({});
     const [unreadCounts, setUnreadCounts] = useState({ chat: 0, group: 0, alert: 0 }); // NEW
+    const [dueFlashcardsCount, setDueFlashcardsCount] = useState(0); // SRS Count
     
     // --- REAL-TIME SOCKET CONNECTION ---
     const [socket, setSocket] = useState<Socket | null>(null);
@@ -227,7 +203,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     // --- ENHANCED SOUND SYSTEM ---
-    // Ref for Theme Music Audio to control it across renders
     const themeAudioRef = useRef<HTMLAudioElement | null>(null);
     const themeFadeIntervalRef = useRef<number | null>(null);
 
@@ -237,30 +212,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const audio = new Audio(url);
         
         // Volume Mix
-        if (type === 'click') audio.volume = 0.2; // Gentle clicks
+        if (type === 'click') audio.volume = 0.2;
         else if (type === 'tap') audio.volume = 0.1;
         else if (type === 'sent') audio.volume = 0.3;
-        else if (type === 'celebration') audio.volume = 0.6; // Louder for celebration
+        else if (type === 'celebration') audio.volume = 0.6;
         else if (type === 'reward') audio.volume = 0.5;
         else if (type === 'keyboard_mech') {
-            audio.volume = 0.2; // Softer volume for Thocky sound (was 0.25)
-            audio.currentTime = 0; // Ensure immediate replay for fast typers
+            audio.volume = 0.2;
+            audio.currentTime = 0; 
         }
         else audio.volume = 0.5; 
 
-        audio.play().catch(e => {
-            // Ignore auto-play blocking errors for rapid interactions
-        });
+        audio.play().catch(e => {});
     };
 
     // --- THEME MUSIC PLAYER (EFFECT) ---
-    // Listens to skin changes and plays associated ambience
     useEffect(() => {
         const skinId = db.GAMIFICATION.equippedSkin;
         const skinConfig = SKIN_CONFIG[skinId];
         
         if (skinConfig && skinConfig.musicUrl) {
-            // Stop existing theme music if any
             if (themeAudioRef.current) {
                 themeAudioRef.current.pause();
                 themeAudioRef.current.currentTime = 0;
@@ -269,10 +240,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 clearInterval(themeFadeIntervalRef.current);
             }
 
-            // Init new audio
             const audio = new Audio(skinConfig.musicUrl);
             themeAudioRef.current = audio;
-            audio.volume = 0.7; // INCREASED: Base volume for ambience (was 0.3)
+            audio.volume = 0.7; 
             audio.loop = false;
 
             const playPromise = audio.play();
@@ -280,55 +250,45 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (playPromise !== undefined) {
                 playPromise
                 .then(() => {
-                    // Logic: Play for 7s full volume, then fade out over 3s (Total 10s)
                     setTimeout(() => {
-                        // Start Fading Out
-                        const fadeStep = 0.05; // Amount to decrease
-                        const fadeIntervalTime = 150; // Every 150ms
+                        const fadeStep = 0.05;
+                        const fadeIntervalTime = 150;
                         
                         themeFadeIntervalRef.current = window.setInterval(() => {
                             if (audio.volume > fadeStep) {
                                 audio.volume -= fadeStep;
                             } else {
-                                // Stop completely
                                 audio.volume = 0;
                                 audio.pause();
                                 if (themeFadeIntervalRef.current) clearInterval(themeFadeIntervalRef.current);
                             }
                         }, fadeIntervalTime);
 
-                    }, 7000); // Wait 7s before fading
+                    }, 7000); 
                 })
                 .catch(error => {
-                    // Auto-play was prevented
                     console.log("Theme music auto-play prevented:", error);
                 });
             }
         }
-    }, [db.GAMIFICATION.equippedSkin]); // Trigger on skin change
+    }, [db.GAMIFICATION.equippedSkin]);
 
     // --- GLOBAL SOUND LISTENERS ---
     useEffect(() => {
         const handleGlobalInteraction = (e: MouseEvent) => {
-            // Detect clicks on interactive elements
             const target = e.target as HTMLElement;
-            // Identify clickable elements broadly
             const isInteractive = target.closest('button, a, input, select, textarea, [role="button"], .btn, .card, .clickable');
             
             if (isInteractive) {
-                // Play 'click' sound for interactive elements
                 playSound('click');
             }
         };
 
-        // NEW: KEYBOARD TYPING SOUND LISTENER
         const handleGlobalTyping = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement;
             const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
             
-            // Only play sound if typing in an input field and not holding down key
             if (isInput && !e.repeat) {
-                // Ignore modifier keys to reduce noise
                 const ignoredKeys = ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'];
                 if (!ignoredKeys.includes(e.key)) {
                     playSound('keyboard_mech');
@@ -336,7 +296,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
         };
 
-        // Use 'mousedown' for instant feedback before 'click' logic fires
         window.addEventListener('mousedown', handleGlobalInteraction);
         window.addEventListener('keydown', handleGlobalTyping);
 
@@ -355,7 +314,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
             console.log("Fetching global data from:", BACKEND_URL);
             
-            // Parallel fetch for speed
             const [coursesRes, lessonsRes, assignRes, quizzesRes, subRes, usersRes] = await Promise.all([
                 fetch(`${BACKEND_URL}/courses`),
                 fetch(`${BACKEND_URL}/lessons`),
@@ -372,7 +330,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const submissions = await subRes.json();
             const usersData = await usersRes.json();
 
-            // Transform Data
             const coursesList: Course[] = [];
             const courseStructure: Record<string, CourseStructure> = {};
             coursesData.forEach((c: any) => {
@@ -415,7 +372,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, []);
 
-    // --- REFRESH USER STATUS LOOP ---
     useEffect(() => {
         const interval = setInterval(() => {
             fetch(`${BACKEND_URL}/users`)
@@ -430,6 +386,44 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return () => clearInterval(interval);
     }, []);
 
+    // --- SRS FETCH (ROBUST) ---
+    const fetchDueFlashcards = async (userId: string) => {
+        try {
+            // Using AbortController for timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+            const res = await fetch(`${BACKEND_URL}/reviews/due/${userId}`, {
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+
+            if (!res.ok) throw new Error(`Status: ${res.status}`);
+            
+            const cards = await res.json();
+            setDueFlashcardsCount(cards.length);
+            return cards;
+        } catch (e) {
+            console.error("Failed to fetch due cards (SRS):", e);
+            // Return empty array to prevent UI hang, don't throw
+            return [];
+        }
+    };
+
+    const recordCardReview = async (data: { cardId: string, rating: 'easy'|'medium'|'hard', sourceType: string, sourceId: string, nodeId?: string }) => {
+        try {
+            await fetch(`${BACKEND_URL}/reviews/record`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            setDueFlashcardsCount(prev => Math.max(0, prev - 1));
+        } catch (e) {
+            console.error("Failed to record review:", e);
+        }
+    };
+
     // --- SYNC USER TO DB ---
     const syncUserToDb = useCallback((user: User) => {
         setDb(prev => {
@@ -443,25 +437,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             };
         });
 
-        // --- INIT SOCKET CONNECTION ---
+        fetchDueFlashcards(user.id);
+
         if (!socket) {
             const newSocket = io(BASE_URL);
             setSocket(newSocket);
 
             newSocket.on('connect', () => {
                 console.log('✅ Socket Connected');
-                // Join personal room
                 newSocket.emit('join_user', user.id);
             });
 
-            // Listen for 1-on-1 Messages
             newSocket.on('receive_message', (msg: ChatMessage) => {
                 playNotificationSound();
                 setUnreadCounts(prev => ({ ...prev, chat: prev.chat + 1 }));
                 setDb(prev => {
                     const key = [msg.from, msg.to].sort().join('_');
                     const existingMsgs = prev.CHAT_MESSAGES[key] || [];
-                    // Deduplicate
                     if (existingMsgs.some(m => m.id === msg.id)) return prev;
                     return {
                         ...prev,
@@ -473,24 +465,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 });
             });
 
-            // Listen for Group Messages
             newSocket.on('receive_group_message', (msg: GroupChatMessage) => {
                 playNotificationSound();
                 setUnreadCounts(prev => ({ ...prev, group: prev.group + 1 }));
                 setDb(prev => {
                     const existingMsgs = prev.GROUP_CHAT_MESSAGES[msg.groupId] || [];
-                    if (existingMsgs.some(m => m.id === msg.id)) return prev; // Dedupe
+                    if (existingMsgs.some(m => m.id === msg.id)) return prev; 
                     return {
                         ...prev,
                         GROUP_CHAT_MESSAGES: {
                             ...prev.GROUP_CHAT_MESSAGES,
-                            [msg.groupId]: [...existingMsgs, { ...msg, timestamp: new Date(msg.timestamp) }] // Fix date string
+                            [msg.groupId]: [...existingMsgs, { ...msg, timestamp: new Date(msg.timestamp) }]
                         }
                     };
                 });
             });
 
-            // NEW: Listen for Deleted Group Messages
             newSocket.on('group_message_deleted', ({ msgId, groupId }) => {
                 setDb(prev => {
                     const groupMsgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
@@ -504,7 +494,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 });
             });
 
-            // Listen for General Notifications (Assignments, Announcements)
             newSocket.on('receive_notification', (notif: Notification) => {
                 playSound('notification');
                 setUnreadCounts(prev => ({ ...prev, alert: prev.alert + 1 }));
@@ -520,7 +509,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 });
             });
 
-            // Listen for Updates (e.g. SOS Resolved)
             newSocket.on('receive_group_message_update', (updatedMsg: GroupChatMessage) => {
                 setDb(prev => {
                     const groupMsgs = prev.GROUP_CHAT_MESSAGES[updatedMsg.groupId] || [];
@@ -537,7 +525,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [socket]);
 
-    // --- SYNC WITH BACKEND ---
     const fetchUserData = useCallback(async (userId: string) => {
         try {
             console.log("Fetching user data for:", userId);
@@ -548,7 +535,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 fetch(`${BACKEND_URL}/groups`),
                 fetch(`${BACKEND_URL}/group-chat/all`),
                 fetch(`${BACKEND_URL}/paths/${userId}`),
-                fetch(`${BACKEND_URL}/decks/${userId}`) // NEW: Fetch Decks
+                fetch(`${BACKEND_URL}/decks/${userId}`) 
             ]);
 
             const [notes, tasks, chatMessages, groups, groupMessages, paths, decks] = await Promise.all([
@@ -590,10 +577,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 STUDY_GROUPS: formattedGroups,
                 GROUP_CHAT_MESSAGES: groupChatMap,
                 LEARNING_PATHS: pathsMap,
-                FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, ...decksMap } // Merge decks
+                FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, ...decksMap } 
             }));
 
-            // Socket: Join group rooms now that we know them
             if (socket) {
                 formattedGroups.forEach((g: StudyGroup) => {
                     if (g.members.includes(userId)) {
@@ -650,8 +636,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const total = quiz?.questions.length || 0;
         const percentage = total > 0 ? (score/total)*100 : 0;
         
-        // Sound logic for quiz
-        if (percentage >= 100) playSound('celebration'); // Perfect score
+        if (percentage >= 100) playSound('celebration'); 
         else if (percentage >= 80) playSound('level_up');
         else playSound('success');
 
@@ -727,7 +712,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const completeOnboarding = (userId: string) => { 
-        playSound('celebration'); // Welcome fanfare
+        playSound('celebration'); 
         setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], hasSeenOnboarding: true } } })); 
     };
     const dismissAnnouncement = (id: string) => { setDb(prev => ({ ...prev, ANNOUNCEMENTS: prev.ANNOUNCEMENTS.filter(a => a.id !== id) })); };
@@ -750,14 +735,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const checkDailyDiamondReward = () => {
         const today = new Date().toDateString();
         if (db.GAMIFICATION.lastStudyDate !== today) {
-            playSound('celebration'); // Big daily reward
+            playSound('celebration'); 
             setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds + 5, lastStudyDate: today, streakDays: prev.GAMIFICATION.streakDays + 1 } }));
             return true;
         }
         return false;
     };
     const unlockSecretReward = (userId: string, type: 'skin'|'diamond', value: string|number) => {
-        playSound('celebration'); // Rare find
+        playSound('celebration');
         setDb(prev => {
             const newState = { ...prev.GAMIFICATION };
             if (type === 'diamond') newState.diamonds += (value as number);
@@ -766,7 +751,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
     const collectSpaceJunk = (junk: SpaceJunk) => { 
-        playSound('reward'); // Pop sound for collection
+        playSound('reward'); 
         setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, junkInventory: [...prev.GAMIFICATION.junkInventory, junk] } })); 
     };
     const recycleSpaceJunk = (junkId: string) => {
@@ -779,136 +764,515 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const restoreStreak = () => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, lastStudyDate: new Date().toDateString() } })); };
     const recordSpeedRunResult = (userId: string, score: number) => { console.log(`User ${userId} scored ${score} in Speed Run`); };
     
-    // --- CHAT WITH SOCKET.IO ---
-    const sendChatMessage = async (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => {
-        const id = `msg_${Date.now()}`;
-        const newMsgPayload = { id, from: fromId, to: toId, text, timestamp: new Date(), challenge, intel, trade, gradeDispute, reward, squadronInvite };
-
-        try {
-            playSound('sent'); // Optimistic sound
-            // Optimistic update
-            setDb(prev => {
-                const key = [fromId, toId].sort().join('_');
-                const msgs = prev.CHAT_MESSAGES[key] || [];
-                return { ...prev, CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, [key]: [...msgs, newMsgPayload] } };
-            });
-
-            await fetch(`${BACKEND_URL}/chat/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMsgPayload) });
-        } catch (e) { console.error("Failed to send chat message:", e); }
-    };
-
-    // --- GROUP CHAT WITH SOCKET.IO ---
-    const sendGroupMessage = async (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => {
-        const id = `gmsg_${Date.now()}`;
-        const newMsgPayload = {
-            id, groupId, user: { id: user.id, name: user.name, role: user.role },
-            text, isSOS: metadata?.isSOS, sosStatus: metadata?.isSOS ? 'PENDING' : undefined, isWhisper: metadata?.isWhisper, timestamp: new Date()
+    // --- CHAT IMPLEMENTATIONS ---
+    const sendChatMessage = (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => {
+        const newMessage: ChatMessage = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            from: fromId,
+            to: toId,
+            text,
+            timestamp: new Date(),
+            challenge, intel, trade, gradeDispute, reward, squadronInvite
         };
 
-        try {
-            playSound('sent');
-            // Optimistic update
-            setDb(prev => {
-                const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
-                return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: [...msgs, newMsgPayload] } };
-            });
+        setDb(prev => {
+            const key = [fromId, toId || ''].sort().join('_');
+            const existing = prev.CHAT_MESSAGES[key] || [];
+            return {
+                ...prev,
+                CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, [key]: [...existing, newMessage] }
+            };
+        });
 
-            await fetch(`${BACKEND_URL}/group-chat/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMsgPayload) });
-        } catch (e) { console.error("Failed to send group message:", e); }
+        fetch(`${BACKEND_URL}/chat/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newMessage)
+        }).catch(console.error);
     };
 
-    const deleteGroupMessage = async (groupId: string, msgId: string) => {
-        try {
-            playSound('error'); // Deletion sound
-            // Optimistically remove from state
-            setDb(prev => {
-                const groupMsgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
-                return {
-                    ...prev,
-                    GROUP_CHAT_MESSAGES: {
-                        ...prev.GROUP_CHAT_MESSAGES,
-                        [groupId]: groupMsgs.filter(m => m.id !== msgId)
-                    }
-                };
-            });
+    const sendGroupMessage = (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => {
+        const newMessage: GroupChatMessage = {
+            id: `gmsg_${Date.now()}`,
+            groupId,
+            user: { id: user.id, name: user.name, role: user.role },
+            text,
+            timestamp: new Date(),
+            isSOS: metadata?.isSOS,
+            sosStatus: metadata?.isSOS ? 'PENDING' : undefined,
+            isWhisper: metadata?.isWhisper
+        };
 
-            await fetch(`${BACKEND_URL}/group-chat/${msgId}`, { method: 'DELETE' });
-        } catch (e) {
-            console.error("Failed to delete group message:", e);
-        }
+        setDb(prev => {
+            const existing = prev.GROUP_CHAT_MESSAGES[groupId] || [];
+            return {
+                ...prev,
+                GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: [...existing, newMessage] }
+            };
+        });
+
+        fetch(`${BACKEND_URL}/group-chat/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newMessage)
+        }).catch(console.error);
     };
 
-    const joinGroup = async (groupId: string, userId: string, inviteMsgId?: string) => {
-        try {
-            playSound('success');
-            setDb(prev => {
-                const groups = prev.STUDY_GROUPS.map(g => g.id === groupId && !g.members.includes(userId) ? { ...g, members: [...g.members, userId] } : g);
-                const updatedUsers = { ...prev.USERS, [userId]: { ...prev.USERS[userId], squadronId: groupId } };
-                let newChats = prev.CHAT_MESSAGES;
-                if (inviteMsgId) {
-                    newChats = { ...prev.CHAT_MESSAGES };
-                    for (const key in newChats) {
-                        newChats[key] = newChats[key].map(m => m.id === inviteMsgId ? { ...m, squadronInvite: { ...m.squadronInvite!, status: 'ACCEPTED' } } : m);
-                    }
-                }
-                return { ...prev, STUDY_GROUPS: groups, USERS: updatedUsers, CHAT_MESSAGES: newChats };
-            });
-
-            await fetch(`${BACKEND_URL}/groups/${groupId}/join`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId }) });
-            
-            // Join socket room
-            if (socket) {
-                socket.emit('join_group', groupId);
+    const deleteGroupMessage = (groupId: string, msgId: string) => {
+        setDb(prev => ({
+            ...prev,
+            GROUP_CHAT_MESSAGES: {
+                ...prev.GROUP_CHAT_MESSAGES,
+                [groupId]: (prev.GROUP_CHAT_MESSAGES[groupId] || []).filter(m => m.id !== msgId)
             }
-
-        } catch (e) { console.error("Failed to join group:", e); }
+        }));
+        fetch(`${BACKEND_URL}/group-chat/${msgId}`, { method: 'DELETE' }).catch(console.error);
     };
 
-    const createGroup = async (name: string, creatorId: string) => {
-        const id = `g_${Date.now()}`;
-        const newGroup = { id, name, members: [creatorId] };
-        try {
-            playSound('success');
-            setDb(prev => ({ 
-                ...prev, STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
-                USERS: { ...prev.USERS, [creatorId]: { ...prev.USERS[creatorId], squadronId: id } }
-            }));
-            await fetch(`${BACKEND_URL}/groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newGroup) });
-            // Join new room
-            if (socket) socket.emit('join_group', id);
-        } catch (e) { console.error("Failed to create group:", e); }
+    const joinGroup = (groupId: string, userId: string, inviteMsgId?: string) => {
+        setDb(prev => {
+            const group = prev.STUDY_GROUPS.find(g => g.id === groupId);
+            if (!group) return prev;
+            if (group.members.includes(userId)) return prev;
+            
+            const updatedGroup = { ...group, members: [...group.members, userId] };
+            return {
+                ...prev,
+                STUDY_GROUPS: prev.STUDY_GROUPS.map(g => g.id === groupId ? updatedGroup : g)
+            };
+        });
+        
+        fetch(`${BACKEND_URL}/groups/${groupId}/join`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
+        }).catch(console.error);
+
+        if (socket) socket.emit('join_group', groupId);
+    };
+
+    const createGroup = (name: string, creatorId: string) => {
+        const newGroup: StudyGroup = {
+            id: `g_${Date.now()}`,
+            name,
+            members: [creatorId]
+        };
+        setDb(prev => ({
+            ...prev,
+            STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup]
+        }));
+        
+        fetch(`${BACKEND_URL}/groups`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newGroup)
+        }).catch(console.error);
+        
+        if(socket) socket.emit('join_group', newGroup.id);
     };
 
     const createRaidParty = (name: string, creatorId: string, memberIds: string[], bossName: string) => {
-        const groupId = `g_raid_${Date.now()}`;
-        createGroup(name, creatorId);
+        const newGroup: StudyGroup = {
+            id: `raid_${Date.now()}`,
+            name: `⚔️ ${name}`,
+            members: [creatorId, ...memberIds],
+            mission: {
+                id: `mis_${Date.now()}`,
+                title: `Raid Boss: ${bossName}`,
+                target: 1,
+                current: 0,
+                reward: 500,
+                type: 'boss_raid'
+            }
+        };
+        setDb(prev => ({ ...prev, STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup] }));
+        fetch(`${BACKEND_URL}/groups`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newGroup)
+        }).catch(console.error);
+    };
+
+    const resolveSOS = (groupId: string, msgId: string, rescuerId: string) => {
+        const rescuerName = db.USERS[rescuerId]?.name || rescuerId;
+        setDb(prev => {
+            const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
+            const newMsgs = msgs.map(m => m.id === msgId ? { ...m, sosStatus: 'RESOLVED', rescuerName } : m);
+            return {
+                ...prev,
+                GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: newMsgs }
+            };
+        });
+        fetch(`${BACKEND_URL}/group-chat/${msgId}/resolve`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rescuerName })
+        }).catch(console.error);
+    };
+
+    const processTrade = (msgId: string, buyerId: string) => {
+        // Mock logic for trading
+        setDb(prev => {
+            return prev;
+        });
+    };
+
+    // --- LEARNING PATHS ---
+    const createLearningPath = async (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number) => {
+        const newPath: LearningPath = {
+            id: `lp_${Date.now()}`,
+            creatorId: userId,
+            title,
+            topic,
+            createdAt: new Date().toISOString(),
+            targetLevel: meta.level,
+            goal: meta.goal,
+            dailyCommitment: meta.time,
+            nodes,
+            wager: wagerAmount ? { amount: wagerAmount, deadline: new Date(Date.now() + 7*24*60*60*1000).toISOString(), isResolved: false } : undefined
+        };
         
-        const systemText = `⚔️ RAID PARTY STARTED!\n\nTarget: **${bossName}**\n\nTất cả thành viên hãy phối hợp để tiêu diệt Boss (hoàn thành bài tập) trước khi hết giờ!`;
-        const systemUser: User = { id: 'system', name: 'System', role: 'ADMIN', isLocked: false, apiKey: null, hasSeenOnboarding: true };
-        setTimeout(() => { sendGroupMessage(groupId, systemUser, systemText); }, 500);
+        setDb(prev => ({
+            ...prev,
+            LEARNING_PATHS: { ...prev.LEARNING_PATHS, [newPath.id]: newPath }
+        }));
+
+        await fetch(`${BACKEND_URL}/paths`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newPath)
+        });
+
+        return newPath.id;
     };
 
-    const resolveSOS = async (groupId: string, msgId: string, rescuerId: string) => {
-        try {
-            playSound('level_up');
-            const rescuerName = db.USERS[rescuerId]?.name || rescuerId;
-            // No need to setDb here if using sockets, as the update event will come back. 
-            // But keeping optimistic for responsiveness is good.
-            setDb(prev => {
-                const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
-                const newMsgs = msgs.map(m => m.id === msgId ? { ...m, sosStatus: 'RESOLVED', rescuerName } : m);
-                return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: newMsgs } };
+    const assignLearningPath = async (teacherName: string, studentIds: string[], pathData: any) => {
+        for (const studentId of studentIds) {
+            await createLearningPath(studentId, pathData.title, pathData.topic, pathData.nodes, {
+                level: pathData.targetLevel,
+                goal: pathData.goal,
+                time: pathData.dailyCommitment
             });
-
-            await fetch(`${BACKEND_URL}/group-chat/${msgId}/resolve`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rescuerName }) });
-        } catch (e) { console.error("Failed to resolve SOS:", e); }
+        }
     };
 
-    const processTrade = (msgId: string, buyerId: string) => { };
+    const updateNodeProgress = (pathId: string, nodeId: string, data: Partial<LearningNode>) => {
+        setDb(prev => {
+            const path = prev.LEARNING_PATHS[pathId];
+            if (!path) return prev;
+            const newNodes = path.nodes.map(n => n.id === nodeId ? { ...n, ...data } : n);
+            return {
+                ...prev,
+                LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } }
+            };
+        });
+        
+        const path = db.LEARNING_PATHS[pathId];
+        if(path) {
+             const newNodes = path.nodes.map(n => n.id === nodeId ? { ...n, ...data } : n);
+             fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nodes: newNodes })
+            }).catch(console.error);
+        }
+    };
+
+    const unlockNextNode = (pathId: string, currentNodeId: string) => {
+        setDb(prev => {
+            const path = prev.LEARNING_PATHS[pathId];
+            if (!path) return prev;
+            const idx = path.nodes.findIndex(n => n.id === currentNodeId);
+            if (idx >= 0 && idx < path.nodes.length - 1) {
+                const nextNode = path.nodes[idx + 1];
+                const newNodes = [...path.nodes];
+                newNodes[idx + 1] = { ...nextNode, isLocked: false };
+                
+                fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nodes: newNodes })
+                }).catch(console.error);
+
+                return {
+                    ...prev,
+                    LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } }
+                };
+            }
+            return prev;
+        });
+    };
+
+    const extendLearningPath = (pathId: string, newNodes: LearningNode[]) => {
+        setDb(prev => {
+            const path = prev.LEARNING_PATHS[pathId];
+            if (!path) return prev;
+            const updatedNodes = [...path.nodes, ...newNodes];
+            
+            fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nodes: updatedNodes })
+            }).catch(console.error);
+
+            return {
+                ...prev,
+                LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: updatedNodes } }
+            };
+        });
+    };
+
+    const skipLearningPath = (userId: string, pathId: string) => {
+        setDb(prev => {
+            const path = prev.LEARNING_PATHS[pathId];
+            if (!path) return prev;
+            const newNodes = path.nodes.map(n => ({ ...n, isCompleted: true, isLocked: false }));
+            
+            fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nodes: newNodes })
+            }).catch(console.error);
+
+            return {
+                ...prev,
+                LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } }
+            };
+        });
+        awardXP(1000); // Bonus
+    };
+
+    const addTask = (userId: string, text: string) => {
+        const newTask: Task = {
+            id: `t_${Date.now()}`,
+            userId,
+            text,
+            isCompleted: false,
+            isArchived: false,
+            createdAt: new Date().toISOString()
+        };
+        setDb(prev => ({
+            ...prev,
+            TASKS: { ...prev.TASKS, [newTask.id]: newTask }
+        }));
+        fetch(`${BACKEND_URL}/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newTask)
+        }).catch(console.error);
+    };
+
+    const toggleTaskCompletion = (taskId: string, isCompleted: boolean) => {
+        setDb(prev => ({
+            ...prev,
+            TASKS: { ...prev.TASKS, [taskId]: { ...prev.TASKS[taskId], isCompleted, completedAt: isCompleted ? new Date().toISOString() : undefined } }
+        }));
+        fetch(`${BACKEND_URL}/tasks/${taskId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isCompleted, completedAt: isCompleted ? new Date().toISOString() : null })
+        }).catch(console.error);
+    };
+
+    const deleteTask = (taskId: string) => {
+        setDb(prev => {
+            const newTasks = { ...prev.TASKS };
+            delete newTasks[taskId];
+            return { ...prev, TASKS: newTasks };
+        });
+        fetch(`${BACKEND_URL}/tasks/${taskId}`, { method: 'DELETE' }).catch(console.error);
+    };
+
+    const archiveCompletedTasks = (userId: string) => {
+        setDb(prev => {
+            const newTasks = { ...prev.TASKS };
+            Object.values(newTasks).forEach(t => {
+                if (t.userId === userId && t.isCompleted) {
+                    newTasks[t.id] = { ...t, isArchived: true };
+                    fetch(`${BACKEND_URL}/tasks/${t.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ isArchived: true })
+                    }).catch(console.error);
+                }
+            });
+            return { ...prev, TASKS: newTasks };
+        });
+    };
+
+    const createFileAssignment = (title: string, courseId: string) => {
+        const newAsg: Assignment = {
+            id: `a_${Date.now()}`,
+            courseId,
+            title,
+            type: 'file',
+            createdAt: new Date().toISOString()
+        };
+        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [newAsg.id]: newAsg } }));
+        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newAsg) }).catch(console.error);
+    };
+
+    const createQuizAssignment = (title: string, courseId: string, questions: QuizQuestion[]) => {
+        const quizId = `qz_${Date.now()}`;
+        const newQuiz: Quiz = { id: quizId, title, questions };
+        const newAsg: Assignment = {
+            id: `a_${Date.now()}`,
+            courseId,
+            title,
+            type: 'quiz',
+            quizId,
+            createdAt: new Date().toISOString()
+        };
+        setDb(prev => ({
+            ...prev,
+            QUIZZES: { ...prev.QUIZZES, [quizId]: newQuiz },
+            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [newAsg.id]: newAsg }
+        }));
+        
+        fetch(`${BACKEND_URL}/quizzes`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newQuiz) }).catch(console.error);
+        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newAsg) }).catch(console.error);
+    };
+
+    const createBossChallenge = (courseId: string, title: string, description: string, xp: number) => {
+        const newAsg: Assignment = {
+            id: `boss_${Date.now()}`,
+            courseId,
+            title,
+            description,
+            type: 'file',
+            isBoss: true,
+            rank: 'S',
+            rewardXP: xp,
+            createdAt: new Date().toISOString()
+        };
+        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [newAsg.id]: newAsg } }));
+        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newAsg) }).catch(console.error);
+    };
+
+    const sendIntervention = (assignmentId: string, questionId: string, note: string, studentIds: string[]) => {
+        studentIds.forEach(sid => {
+            const notif = {
+                id: `notif_${Date.now()}_${sid}`,
+                text: `⚠️ Giáo viên đã gửi hướng dẫn bổ sung cho bài tập.`,
+                read: false,
+                type: 'intervention',
+                timestamp: new Date().toISOString(),
+                metadata: { assignmentId, questionId, teacherNote: note }
+            };
+            if(socket) socket.emit('send_notification', { userId: sid, notification: notif });
+        });
+    };
+
+    const adminCreateCourse = async (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => {
+        const courseId = `CS${Date.now().toString().substr(-3)}`;
+        const course: Course = {
+            id: courseId,
+            name,
+            teacher: teacherName,
+            defaultPersona
+        };
+        
+        const courseStructure: CourseStructure = { modules: [] };
+        const newLessons: Lesson[] = [];
+        const newAssignments: Assignment[] = [];
+
+        modules.forEach((mod, mIdx) => {
+            const items: ModuleItem[] = [];
+            mod.items.forEach((item, iIdx) => {
+                const itemId = `${courseId}_${mIdx}_${iIdx}`;
+                if (item.type.startsWith('lesson')) {
+                    newLessons.push({
+                        id: itemId,
+                        courseId,
+                        title: item.title,
+                        type: item.type === 'lesson_video' ? 'video' : 'text',
+                        content: item.contentOrDescription
+                    });
+                    items.push({ type: 'lesson', id: itemId });
+                } else {
+                    newAssignments.push({
+                        id: itemId,
+                        courseId,
+                        title: item.title,
+                        type: item.type === 'assignment_quiz' ? 'quiz' : 'file',
+                        description: item.contentOrDescription
+                    });
+                    items.push({ type: 'assignment', id: itemId });
+                }
+            });
+            courseStructure.modules.push({ id: `m_${mIdx}`, name: mod.title, items });
+        });
+
+        // Persist
+        setDb(prev => ({
+            ...prev,
+            COURSES: [...prev.COURSES, course],
+            COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: courseStructure },
+            LESSONS: { ...prev.LESSONS, ...newLessons.reduce((acc, l) => ({ ...acc, [l.id]: l }), {}) },
+            ASSIGNMENTS: { ...prev.ASSIGNMENTS, ...newAssignments.reduce((acc, a) => ({ ...acc, [a.id]: a }), {}) }
+        }));
+        
+        await fetch(`${BACKEND_URL}/courses`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(course) });
+    };
+
+    const generateArchive = async (apiKey: string, type: 'course'|'squadron', id: string, name: string): Promise<string> => {
+        let data = {};
+        if (type === 'course') {
+            data = db.COURSE_STRUCTURE[id] || {};
+        } else {
+            data = db.GROUP_CHAT_MESSAGES[id] || [];
+        }
+        return await generateLegacyArchiveContent(apiKey, data, type, name);
+    };
+
+    const addCommunityQuestion = (userId: string, nodeId: string, question: QuizQuestion) => {
+        setDb(prev => ({
+            ...prev,
+            COMMUNITY_QUESTIONS: [...prev.COMMUNITY_QUESTIONS, { userId, nodeId, question, timestamp: new Date() }]
+        }));
+    };
+
+    const addLessonToCourse = (courseId: string, title: string, content: string) => {
+        const lessonId = `l_${Date.now()}`;
+        const newLesson: Lesson = { id: lessonId, courseId, title, type: 'text', content };
+        
+        setDb(prev => {
+            const structure = prev.COURSE_STRUCTURE[courseId];
+            if (!structure) return prev;
+            const modules = [...structure.modules];
+            if (modules.length > 0) {
+                modules[modules.length - 1].items.push({ type: 'lesson', id: lessonId });
+            } else {
+                modules.push({ id: 'm_1', name: 'Module 1', items: [{ type: 'lesson', id: lessonId }] });
+            }
+            
+            return {
+                ...prev,
+                LESSONS: { ...prev.LESSONS, [lessonId]: newLesson },
+                COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules } }
+            };
+        });
+        
+        fetch(`${BACKEND_URL}/lessons`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newLesson) }).catch(console.error);
+    };
+
+    const editLessonContent = (lessonId: string, newContent: string) => {
+        setDb(prev => ({
+            ...prev,
+            LESSONS: { ...prev.LESSONS, [lessonId]: { ...prev.LESSONS[lessonId], content: newContent } }
+        }));
+    };
+
+    const updateCourseSettings = (courseId: string, settings: Partial<Course>) => {
+        setDb(prev => ({
+            ...prev,
+            COURSES: prev.COURSES.map(c => c.id === courseId ? { ...c, ...settings } : c)
+        }));
+        fetch(`${BACKEND_URL}/courses`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: courseId, ...settings }) }).catch(console.error);
+    };
 
     const sendReward = (teacherId: string, studentId: string, type: 'diamond' | 'item', value: number | string, message: string) => {
-        const rewardData = { type, value, message };
-        sendChatMessage(teacherId, studentId, message, undefined, undefined, undefined, undefined, rewardData);
+        sendChatMessage(teacherId, studentId, message, undefined, undefined, undefined, undefined, { type, value, message });
     };
 
     const createFlashcardDeck = (userId: string, title: string, cards: Flashcard[]) => { 
@@ -918,7 +1282,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: newDeck } })); 
         
-        // Persist to Backend
         fetch(`${BACKEND_URL}/decks`, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
@@ -999,7 +1362,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const updateScratchpad = (userId: string, content: string) => { setDb(prev => ({ ...prev, SCRATCHPAD: { ...prev.SCRATCHPAD, [userId]: content } })); };
 
-    // --- NOTEBOOK SYNC ---
     const createPersonalNote = async (userId: string, title: string, content: string, links?: any) => {
         try {
             playSound('success');
@@ -1053,208 +1415,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatePersonalNote(noteId, { comments: [...(db.PERSONAL_NOTES[noteId]?.comments || []), { id: `c${Date.now()}`, userId, userName: db.USERS[userId]?.name || userId, content, highlightedText, timestamp: new Date().toISOString() } as any] });
     };
 
-    // --- LEARNING PATH ---
-    const createLearningPath = async (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number): Promise<string> => {
-        if (wagerAmount && wagerAmount > 0) { if (db.GAMIFICATION.diamonds < wagerAmount) throw new Error("Không đủ Kim Cương để đặt cược."); }
-        const id = `lp_${Date.now()}`;
-        const deadline = new Date(); deadline.setDate(deadline.getDate() + 7);
-        const newPath: LearningPath = { 
-            id, creatorId: userId, title, topic, createdAt: new Date().toISOString(), nodes, targetLevel: meta.level, goal: meta.goal, dailyCommitment: meta.time, 
-            wager: wagerAmount ? { amount: wagerAmount, deadline: deadline.toISOString(), isResolved: false } : undefined 
-        };
-        try {
-            const res = await fetch(`${BACKEND_URL}/paths`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPath) });
-            if (!res.ok) throw new Error("Failed to save path");
-            playSound('success');
-            setDb(prev => {
-                let newGamification = prev.GAMIFICATION;
-                if (wagerAmount) { newGamification = { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds - wagerAmount }; }
-                return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [id]: newPath }, GAMIFICATION: newGamification };
-            });
-            return id;
-        } catch (e: any) { console.error(e); throw e; }
-    };
-
-    const assignLearningPath = async (teacherName: string, studentIds: string[], pathData: any) => {
-        const newPaths: Record<string, LearningPath> = { ...db.LEARNING_PATHS };
-        const newNotifs: Record<string, Notification[]> = { ...db.NOTIFICATIONS };
-        const promises = studentIds.map(async (studentId) => {
-            const id = `lp_${Date.now()}_${studentId}`;
-            const assignedPath = { ...pathData, id, creatorId: studentId, createdAt: new Date().toISOString() };
-            newPaths[id] = assignedPath;
-            // No need to manually add notification here as backend emits it now
-            // But we update local DB optimistically
-            const notif: Notification = { id: `n_assign_${Date.now()}_${studentId}`, text: `👨‍🏫 Giáo viên ${teacherName} đã giao lộ trình học tập mới: "${pathData.title}"`, read: false, type: 'system', timestamp: new Date().toISOString() };
-            const currentNotifs = newNotifs[studentId] || [];
-            newNotifs[studentId] = [notif, ...currentNotifs];
-            
-            try { await fetch(`${BACKEND_URL}/paths`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(assignedPath) }); } catch (e) { console.error(`Failed to assign path to ${studentId}:`, e); }
-        });
-        await Promise.all(promises);
-        setDb(prev => ({ ...prev, LEARNING_PATHS: newPaths, NOTIFICATIONS: newNotifs }));
-    };
-
-    const updateNodeProgress = (pathId: string, nodeId: string, data: Partial<LearningNode>) => {
-        setDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if (!path) return prev;
-            const newNodes = path.nodes.map(n => n.id === nodeId ? { ...n, ...data } : n);
-            const updatedPath = { ...path, nodes: newNodes };
-            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
-        });
-    };
-
-    const unlockNextNode = (pathId: string, nodeId: string) => {
-        playSound('level_up');
-        setDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if (!path) return prev;
-            const index = path.nodes.findIndex(n => n.id === nodeId);
-            const newNodes = [...path.nodes];
-            newNodes[index] = { ...newNodes[index], isCompleted: true };
-            if (index < path.nodes.length - 1) newNodes[index + 1] = { ...newNodes[index + 1], isLocked: false };
-            const updatedPath = { ...path, nodes: newNodes };
-            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
-        });
-    };
-
-    const extendLearningPath = (pathId: string, newNodes: LearningNode[]) => {
-        setDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if (!path) return prev;
-            const updatedPath = { ...path, nodes: [...path.nodes, ...newNodes] };
-            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
-        });
-    };
-
-    const skipLearningPath = (userId: string, pathId: string) => {
-        setDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if (!path) return prev;
-            const newNodes = path.nodes.map(n => ({ ...n, isLocked: false, isCompleted: true }));
-            const updatedPath = { ...path, nodes: newNodes };
-            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
-        });
-    };
-
-    // --- TASK SYNC ---
-    const addTask = async (userId: string, text: string) => {
-        try {
-            const res = await fetch(`${BACKEND_URL}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, text }) });
-            const newTask = await res.json();
-            setDb(prev => ({ ...prev, TASKS: { ...prev.TASKS, [newTask._id]: { ...newTask, id: newTask._id } } }));
-        } catch (e) { console.error(e); }
-    };
-
-    const toggleTaskCompletion = async (taskId: string, isCompleted: boolean) => {
-        setDb(prev => ({ ...prev, TASKS: { ...prev.TASKS, [taskId]: { ...prev.TASKS[taskId], isCompleted, completedAt: isCompleted ? new Date().toISOString() : undefined } } }));
-        try { await fetch(`${BACKEND_URL}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isCompleted, completedAt: isCompleted ? new Date().toISOString() : null }) }); } catch (e) { console.error(e); }
-    };
-
-    const deleteTask = async (taskId: string) => {
-        try { await fetch(`${BACKEND_URL}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isArchived: true }) });
-            setDb(prev => { const newTasks = { ...prev.TASKS }; delete newTasks[taskId]; return { ...prev, TASKS: newTasks }; });
-        } catch (e) { console.error(e); }
-    };
-
-    const archiveCompletedTasks = async (userId: string) => {
-        const tasksToArchive = (Object.values(db.TASKS) as Task[]).filter(t => t.userId === userId && t.isCompleted && !t.isArchived);
-        setDb(prev => { const newTasks = { ...prev.TASKS }; tasksToArchive.forEach(t => { if (newTasks[t.id]) newTasks[t.id].isArchived = true; }); return { ...prev, TASKS: newTasks }; });
-        try { await Promise.all(tasksToArchive.map(t => fetch(`${BACKEND_URL}/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isArchived: true }) }))); } catch (e) { console.error(e); }
-    };
-
-    const createFileAssignment = (title: string, courseId: string) => {
-        const id = `ass_file_${Date.now()}`;
-        const newAssignment: Assignment = { id, courseId, title, type: 'file', createdAt: new Date().toISOString() };
-        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment }, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] } }));
-        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignment) });
-    };
-
-    const createQuizAssignment = (title: string, courseId: string, questions: QuizQuestion[]) => {
-        const assignId = `ass_quiz_${Date.now()}`;
-        const quizId = `qz_${Date.now()}`;
-        const newAssignment: Assignment = { id: assignId, courseId, title, type: 'quiz', quizId, createdAt: new Date().toISOString() };
-        const newQuiz = { id: quizId, questions, title };
-        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [assignId]: newAssignment }, QUIZZES: { ...prev.QUIZZES, [quizId]: newQuiz }, QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: {} } }));
-        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignment) });
-        fetch(`${BACKEND_URL}/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newQuiz) });
-    };
-
-    const createBossChallenge = (courseId: string, title: string, description: string, xp: number) => {
-        const id = `ass_boss_${Date.now()}`;
-        const newAssignment: Assignment = { id, courseId, title, type: 'file', createdAt: new Date().toISOString(), rank: 'S', isBoss: true, rewardXP: xp, description: description };
-        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment }, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] } }));
-        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignment) });
-    };
-
-    const sendIntervention = (assignmentId: string, questionId: string, note: string, studentIds: string[]) => {
-        setDb(prev => {
-            const newNotifs = { ...prev.NOTIFICATIONS };
-            studentIds.forEach(uid => {
-                const notif = { id: `int_${Date.now()}_${uid}`, text: `📢 Giáo viên đã gửi lời giảng cho câu hỏi bạn sai trong bài tập.`, read: false, type: 'intervention', timestamp: new Date().toISOString(), metadata: { assignmentId, questionId, teacherNote: note } };
-                newNotifs[uid] = [...(newNotifs[uid] || []), notif];
-            });
-            return { ...prev, NOTIFICATIONS: newNotifs };
-        });
-    };
-    
-    const adminCreateCourse = async (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => {
-        const courseId = `CS_${Date.now()}`;
-        const mappedModules = [];
-        try {
-            for (const mod of modules) {
-                const modId = `m_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                const items = [];
-                for (const item of mod.items) {
-                    const itemId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                    if (item.type.includes('lesson')) {
-                        const lessonData = { id: itemId, courseId: courseId, title: item.title, type: (item.type === 'lesson_video' ? 'video' : 'text') as 'video' | 'text', content: item.contentOrDescription };
-                        await fetch(`${BACKEND_URL}/lessons`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lessonData) });
-                        items.push({ type: 'lesson', id: itemId });
-                        setDb(prev => ({ ...prev, LESSONS: { ...prev.LESSONS, [itemId]: lessonData } }));
-                    } else {
-                        const assignmentData = { id: itemId, courseId: courseId, title: item.title, type: (item.type === 'assignment_quiz' ? 'quiz' : 'file') as 'file' | 'quiz', description: item.contentOrDescription, createdAt: new Date().toISOString() };
-                        await fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(assignmentData) });
-                        items.push({ type: 'assignment', id: itemId });
-                        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [itemId]: assignmentData }, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [itemId]: [] }, ...(item.type === 'assignment_quiz' ? { QUIZZES: { ...prev.QUIZZES, [itemId]: { id: `qz_${itemId}`, title: item.title, questions: [] } }, QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [`qz_${itemId}`]: {} } } : {}) }));
-                    }
-                }
-                mappedModules.push({ id: modId, name: mod.title, items });
-            }
-            const courseData = { id: courseId, name: name, teacher: teacherName, defaultPersona, modules: mappedModules };
-            await fetch(`${BACKEND_URL}/courses`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(courseData) });
-            setDb(prev => ({ ...prev, COURSES: [...prev.COURSES, { id: courseId, name, teacher: teacherName, defaultPersona }], COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules: mappedModules } } }));
-        } catch (error) { console.error("Error creating course:", error); throw error; }
-    };
-
-    const generateArchive = async (apiKey: string, type: 'course'|'squadron', id: string, name: string): Promise<string> => {
-        let data: any = {};
-        if (type === 'course') { const course = db.COURSES.find(c => c.id === id); data = { course, structure: db.COURSE_STRUCTURE[id] }; } else { const group = db.STUDY_GROUPS.find(g => g.id === id); data = { group, messages: db.GROUP_CHAT_MESSAGES[id] }; }
-        return await generateLegacyArchiveContent(apiKey, data, type, name);
-    };
-    const addCommunityQuestion = (userId: string, nodeId: string, question: QuizQuestion) => { setDb(prev => ({ ...prev, COMMUNITY_QUESTIONS: [...prev.COMMUNITY_QUESTIONS, { ...question, authorId: userId, nodeId }] })); };
-    const addLessonToCourse = (courseId: string, title: string, content: string) => {
-        setDb(prev => {
-            const newLessonId = `l_note_${Date.now()}`;
-            const newLesson = { id: newLessonId, courseId, title, type: 'text' as const, content };
-            const courseStructure = prev.COURSE_STRUCTURE[courseId];
-            if (!courseStructure) return prev;
-            let newModules = [...courseStructure.modules];
-            if (newModules.length === 0) { newModules.push({ id: `m_imported_${Date.now()}`, name: "Imported Notes", items: [] }); }
-            const targetModuleIndex = newModules.length - 1;
-            const targetModule = newModules[targetModuleIndex];
-            const updatedModule = { ...targetModule, items: [...targetModule.items, { type: 'lesson' as const, id: newLessonId }] };
-            newModules[targetModuleIndex] = updatedModule;
-            return { ...prev, LESSONS: { ...prev.LESSONS, [newLessonId]: newLesson }, COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules: newModules } } };
-        });
-    };
-    const editLessonContent = (lessonId: string, newContent: string) => { setDb(prev => ({ ...prev, LESSONS: { ...prev.LESSONS, [lessonId]: { ...prev.LESSONS[lessonId], content: newContent } } })); };
-    const updateCourseSettings = (courseId: string, settings: Partial<Course>) => { setDb(prev => ({ ...prev, COURSES: prev.COURSES.map(c => c.id === courseId ? { ...c, ...settings } : c) })); };
-
+    // Return the Context Provider
     return (
         <DataContext.Provider value={{
             db, syncUserToDb, unreadCounts, resetUnreadCount, playSound,
@@ -1268,7 +1429,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             unlockSharedNote, addNoteComment, createLearningPath, assignLearningPath, updateNodeProgress, unlockNextNode, extendLearningPath,
             skipLearningPath, addTask, toggleTaskCompletion, deleteTask, archiveCompletedTasks, createFileAssignment, createQuizAssignment, createBossChallenge, sendIntervention,
             adminCreateCourse, generateArchive, addCommunityQuestion, addLessonToCourse, editLessonContent, updateCourseSettings, sendReward,
-            fetchUserData
+            fetchUserData,
+            dueFlashcardsCount, fetchDueFlashcards, recordCardReview
         }}>
             {children}
         </DataContext.Provider>
@@ -1276,6 +1438,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 };
 
 export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+    // ... GlobalStateProvider content ...
     const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
         user_management: 'OPERATIONAL', course_management: 'OPERATIONAL', content_delivery: 'OPERATIONAL', assessment_taking: 'OPERATIONAL', storage_service: 'OPERATIONAL', grading_service: 'OPERATIONAL', notification_service: 'OPERATIONAL', chat_service: 'OPERATIONAL', group_service: 'OPERATIONAL', forum_service: 'OPERATIONAL', ai_tutor_service: 'OPERATIONAL', ai_assistant_service: 'OPERATIONAL', personalization: 'OPERATIONAL', analytics: 'OPERATIONAL'
     });
@@ -1309,6 +1472,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({ childre
     );
 };
 
+// ... (PageProvider, AuthProvider, MusicProvider, PetProvider remain unchanged)
 export const PageProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { page, setPage, pageParams } = useContext(GlobalStateContext)!;
     const navigate = (newPage: string, params?: any) => { setPage(newPage, params); };

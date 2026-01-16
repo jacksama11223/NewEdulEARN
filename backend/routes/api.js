@@ -364,4 +364,153 @@ router.delete('/decks/:id', async (req, res) => {
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
 
+// --- SRS REVIEW SYSTEM (ANKI-STYLE / DUOLINGO-STYLE) ---
+
+// Get all cards due for review from BOTH Decks and Learning Paths
+router.get('/reviews/due/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const now = Date.now();
+        const dueCards = [];
+
+        // 1. Fetch from standalone Decks
+        const decks = await FlashcardDeck.find({ userId });
+        decks.forEach(deck => {
+            deck.cards.forEach(card => {
+                // Determine if card is due (nextReview <= now)
+                // New cards have nextReview = 0, so they are always due.
+                if (card.nextReview <= now) {
+                    dueCards.push({
+                        ...card.toObject(),
+                        sourceType: 'deck',
+                        sourceId: deck.id,
+                        deckTitle: deck.title
+                    });
+                }
+            });
+        });
+
+        // 2. Fetch from Learning Paths (Deep Search)
+        const paths = await LearningPath.find({ creatorId: userId });
+        paths.forEach(path => {
+            path.nodes.forEach(node => {
+                if (node.flashcards && node.flashcards.length > 0) {
+                    node.flashcards.forEach(card => {
+                        if (card.nextReview <= now) {
+                            dueCards.push({
+                                ...card.toObject(),
+                                sourceType: 'path',
+                                sourceId: path.id, // pathId
+                                nodeId: node.id,
+                                deckTitle: `${path.title} - ${node.title}`
+                            });
+                        }
+                    });
+                }
+            });
+        });
+        
+        // Sort: Overdue items first
+        dueCards.sort((a, b) => a.nextReview - b.nextReview);
+
+        res.json(dueCards);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Record review result (Exponential Backoff Algorithm)
+router.post('/reviews/record', async (req, res) => {
+    try {
+        const { cardId, rating, sourceType, sourceId, nodeId } = req.body;
+        // rating: 'easy', 'medium', 'hard'
+        
+        const now = Date.now();
+        const ONE_MINUTE = 60 * 1000;
+        const ONE_HOUR = 60 * ONE_MINUTE;
+        const ONE_DAY = 24 * ONE_HOUR;
+        
+        let doc;
+        let cardList;
+        
+        // Fetch Source
+        if (sourceType === 'deck') {
+            doc = await FlashcardDeck.findOne({ id: sourceId });
+            cardList = doc.cards;
+        } else {
+            doc = await LearningPath.findOne({ id: sourceId });
+            const node = doc.nodes.find(n => n.id === nodeId);
+            if (node) cardList = node.flashcards;
+        }
+
+        if (!doc || !cardList) return res.status(404).json({ message: "Source not found" });
+
+        const cardIndex = cardList.findIndex(c => c.id === cardId);
+        if (cardIndex === -1) return res.status(404).json({ message: "Card not found" });
+
+        const card = cardList[cardIndex];
+        let newBox = card.box || 0; // Box essentially represents 'streak' or 'ease tier'
+        let interval = 0;
+
+        // --- EXPONENTIAL BACKOFF LOGIC (ANKI STYLE) ---
+        if (rating === 'hard') {
+            // FORGOT: Reset to beginning.
+            newBox = 0; 
+            interval = 10 * ONE_MINUTE; // Review again in 10 mins (Learning step)
+        } else if (rating === 'medium') {
+            // STRUGGLED: Keep current level, small boost.
+            // If new, 1 day. If mature, 1.5x current interval (estimated).
+            // Simplified: box stays same, interval is conservative.
+            newBox = Math.max(0, newBox);
+            // Estimate previous interval based on box
+            // If box 0 -> 1 day. Box 1 -> 2 days.
+            const prevIntervalEstimate = (newBox === 0 ? 1 : Math.pow(2.2, newBox)) * ONE_DAY;
+            interval = Math.max(ONE_DAY, prevIntervalEstimate * 1.2); 
+        } else { // 'easy'
+            // MASTERED: Graduated increment.
+            // Box 0 -> 1 day
+            // Box 1 -> 3 days
+            // Box 2 -> 7 days
+            // Box 3 -> 16 days
+            // Box 4 -> 35 days
+            // Box 5 -> 80 days (~3 months)
+            // Box 6 -> 180 days (~6 months)
+            // Box 7 -> 365 days (1 year)
+            
+            newBox = newBox + 1;
+            
+            if (newBox === 1) interval = 1 * ONE_DAY;
+            else if (newBox === 2) interval = 3 * ONE_DAY;
+            else if (newBox === 3) interval = 7 * ONE_DAY;
+            else if (newBox === 4) interval = 16 * ONE_DAY;
+            else if (newBox === 5) interval = 35 * ONE_DAY;
+            else if (newBox === 6) interval = 80 * ONE_DAY;
+            else if (newBox === 7) interval = 180 * ONE_DAY;
+            else interval = 365 * ONE_DAY * (Math.pow(1.1, newBox - 7)); // Year+ with slow growth
+        }
+
+        const nextReview = now + interval;
+
+        // Update In-Memory
+        card.box = newBox;
+        card.nextReview = nextReview;
+        card.lastReviewed = now;
+
+        // Mongoose specifics
+        if (sourceType === 'path') {
+            doc.markModified('nodes');
+        } else {
+            doc.markModified('cards');
+        }
+
+        await doc.save();
+
+        res.json({ message: "Review recorded", nextReview, box: newBox, intervalMs: interval });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: error.message });
+    }
+});
+
 export default router;

@@ -750,12 +750,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }));
     };
 
-    const deleteUser = (userId: string) => {
-        updateDb(prev => {
-            const newUsers = { ...prev.USERS };
-            delete newUsers[userId];
-            return { ...prev, USERS: newUsers };
-        });
+        const deleteUser = async (uid: string) => {
+        try {
+            const res = await fetch(`${BACKEND_URL}/users/${uid}`, { method: 'DELETE' });
+            if (res.ok) {
+                updateDb(prev => {
+                    const n = { ...prev.USERS };
+                    delete n[uid];
+                    return { ...prev, USERS: n };
+                });
+            } else {
+                console.error("Failed to delete user from server");
+                alert("Lỗi: Không thể xóa người dùng khỏi hệ thống (Backend Error).");
+            }
+        } catch (e) {
+            console.error("Delete user error:", e);
+            alert("Lỗi kết nối: Không thể xóa người dùng.");
+        }
     };
 
     const sendAnnouncement = (text: string) => {
@@ -985,13 +996,46 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (e) { console.error(e); }
     };
 
-    const createGroup = (name: string, creatorId: string) => {
-        const newGroup: StudyGroup = {
-            id: `g_${Date.now()}`,
-            name,
-            members: [creatorId]
-        };
-        updateDb(prev => ({ ...prev, STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup] }));
+    const createGroup = async (name: string, creatorId: string) => {
+        try {
+            // FIX: Generate ID on client to satisfy Backend Schema requirements
+            const newGroupId = `g_${Date.now()}`;
+            
+            const res = await fetch(`${BACKEND_URL}/groups`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    id: newGroupId, 
+                    name, 
+                    members: [creatorId] 
+                }) 
+            });
+
+            if (res.ok) {
+                const group: StudyGroup = await res.json();
+                
+                // --- FIX: XÓA PHẦN TỰ CẬP NHẬT Ở ĐÂY ---
+                // Chúng ta sẽ dựa vào sự kiện socket 'db_update' từ server gửi về để cập nhật UI.
+                // Nếu giữ lại dòng dưới đây, UI sẽ hiển thị 2 nhóm (1 do hàm này thêm, 1 do socket thêm).
+                
+                /* 
+                updateDb(prev => ({
+                    ...prev,
+                    STUDY_GROUPS: [...prev.STUDY_GROUPS, group]
+                }));
+                */
+
+                // Join the socket room for real-time updates
+                if (socket) socket.emit('join_group', group.id);
+            } else {
+                const errData = await res.json();
+                console.error("Failed to create group on server:", errData);
+                alert(`Lỗi: Không thể tạo phi đội. ${errData.message || ''}`);
+            }
+        } catch (e) {
+            console.error("Create group network error:", e);
+            alert("Lỗi kết nối: Không thể tạo phi đội.");
+        }
     };
 
     const createRaidParty = () => {};
@@ -1172,32 +1216,57 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
 
-    const createLearningPath = async (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number): Promise<string> => {
+    
+    const createLearningPath = async (creatorId: string, title: string, topic: string, nodes: LearningNode[], surveyData: any, wagerAmount?: number) => {
         try {
+            // FIX: Generate ID client-side
+            const newId = `lp_${Date.now()}`;
+
             const payload = {
-                creatorId: userId,
+                id: newId, // Required by Backend Schema
+                creatorId,
                 title,
                 topic,
-                nodes,
-                ...meta,
-                wager: wagerAmount ? { amount: wagerAmount, deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), isResolved: false } : undefined
+                nodes, // Nodes should already have IDs from generator
+                targetLevel: surveyData.level,
+                goal: surveyData.goal,
+                dailyCommitment: surveyData.time,
+                wager: wagerAmount ? {
+                    amount: wagerAmount,
+                    deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days later
+                    isResolved: false
+                } : undefined
             };
+
             const res = await fetch(`${BACKEND_URL}/paths`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            if (res.ok) {
-                const path = await res.json();
-                updateDb(prev => ({ ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [path.id]: path } }));
-                return path.id;
+
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.message || "Failed to create path on server");
             }
-            throw new Error("Failed to create path");
+
+            const createdPath = await res.json();
+            
+            // Optimistic Update (Optional, usually Socket handles this, but good for instant feedback)
+            updateDb(prev => ({
+                ...prev,
+                LEARNING_PATHS: {
+                    ...prev.LEARNING_PATHS,
+                    [createdPath.id]: createdPath
+                }
+            }));
+
+            return createdPath.id; // Return ID so UI can navigate or show modal
         } catch (e: any) {
-            console.error(e);
-            throw e;
+            console.error("Create Path Error:", e);
+            throw e; // Rethrow to be caught by Page component
         }
     };
+
 
     // FIX: Implement assignLearningPath
     const assignLearningPath = async (teacherName: string, studentIds: string[], pathData: any) => {
@@ -1219,35 +1288,78 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     };
 
-    const updateNodeProgress = (pathId: string, nodeId: string, data: Partial<LearningNode>) => {
-        updateDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if(!path) return prev;
-            const newNodes = path.nodes.map(n => n.id === nodeId ? { ...n, ...data } : n);
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } } };
-        });
+    const updateNodeProgress = async (pathId: string, nodeId: string, updates: Partial<LearningNode>) => {
+        // 1. Calculate new state based on current db
+        const path = db.LEARNING_PATHS[pathId];
+        if (!path) return;
+
+        const updatedNodes = path.nodes.map(n => 
+            n.id === nodeId ? { ...n, ...updates } : n
+        );
+        
+        const updatedPath = { ...path, nodes: updatedNodes };
+
+        // 2. Optimistic UI Update
+        updateDb(prev => ({
+            ...prev,
+            LEARNING_PATHS: {
+                ...prev.LEARNING_PATHS,
+                [pathId]: updatedPath
+            }
+        }));
+
+        // 3. Persist to Backend
+        try {
+            await fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedPath)
+            });
+        } catch (e) {
+            console.error("Failed to save node progress to server:", e);
+            // Optional: Revert UI if needed, or show error toast
+        }
     };
 
     const unlockNextNode = (pathId: string, currentNodeId: string) => {
-        updateDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if(!path) return prev;
-            const index = path.nodes.findIndex(n => n.id === currentNodeId);
-            if(index !== -1 && index < path.nodes.length - 1) {
-                const newNodes = [...path.nodes];
-                newNodes[index + 1].isLocked = false;
-                return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: newNodes } } };
+        const path = db.LEARNING_PATHS[pathId];
+        if (!path) return;
+        
+        const currentIndex = path.nodes.findIndex(n => n.id === currentNodeId);
+        if (currentIndex !== -1 && currentIndex < path.nodes.length - 1) {
+            const nextNode = path.nodes[currentIndex + 1];
+            if (nextNode.isLocked) {
+                updateNodeProgress(pathId, nextNode.id, { isLocked: false });
             }
-            return prev;
-        });
+        }
     };
 
-    const extendLearningPath = (pathId: string, newNodes: LearningNode[]) => {
-        updateDb(prev => {
-            const path = prev.LEARNING_PATHS[pathId];
-            if(!path) return prev;
-            return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: { ...path, nodes: [...path.nodes, ...newNodes] } } };
-        });
+    const extendLearningPath = async (pathId: string, newNodes: LearningNode[]) => {
+        const path = db.LEARNING_PATHS[pathId];
+        if (!path) return;
+
+        const updatedNodes = [...path.nodes, ...newNodes];
+        const updatedPath = { ...path, nodes: updatedNodes };
+
+        // 1. Optimistic Update
+        updateDb(prev => ({
+            ...prev,
+            LEARNING_PATHS: {
+                ...prev.LEARNING_PATHS,
+                [pathId]: updatedPath
+            }
+        }));
+
+        // 2. Persist to Backend
+        try {
+            await fetch(`${BACKEND_URL}/paths/${pathId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedPath)
+            });
+        } catch (e) {
+            console.error("Failed to extend path on server:", e);
+        }
     };
 
     const skipLearningPath = (userId: string, pathId: string) => {

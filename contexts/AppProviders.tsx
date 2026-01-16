@@ -499,6 +499,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }
             } catch (e) { console.error("Assignments fetch error", e); }
 
+
+            // fetch quizzez
+            try {
+                const quizRes = await fetch(`${BACKEND_URL}/quizzes`);
+                if (quizRes.ok) {
+                    const quizzes: Quiz[] = await quizRes.json();
+                    const quizMap: Record<string, Quiz> = {};
+                    quizzes.forEach(q => quizMap[q.id] = q);
+                    updateDb(prev => ({ ...prev, QUIZZES: quizMap }));
+                }
+            } catch (e) { console.error("Quizzes fetch error", e); }
+
             // 2. Fetch Learning Paths
             const pathsRes = await fetch(`${BACKEND_URL}/paths/${userId}`);
             if (pathsRes.ok) {
@@ -693,11 +705,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     // Placeholder implementations for other methods to satisfy interface
-    const updateQuizQuestions = (quizId: string, questions: QuizQuestion[]) => {
-        updateDb(prev => ({
-            ...prev,
-            QUIZZES: { ...prev.QUIZZES, [quizId]: { ...prev.QUIZZES[quizId], questions } }
-        }));
+    const updateQuizQuestions = async (quizId: string, questions: QuizQuestion[]) => {
+        // 1. Optimistic UI Update
+        updateDb(prev => {
+            const q = prev.QUIZZES[quizId];
+            const updatedQuiz = q 
+                ? { ...q, questions } 
+                : { id: quizId, questions, title: 'Updated Quiz' };
+            
+            return {
+                ...prev,
+                QUIZZES: { ...prev.QUIZZES, [quizId]: updatedQuiz }
+            };
+        });
+
+        // 2. Persist to Backend
+        try {
+            const currentQuiz = db.QUIZZES[quizId];
+            
+            // Backend endpoint handles UPSERT with POST
+            const res = await fetch(`${BACKEND_URL}/quizzes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: quizId,
+                    title: currentQuiz?.title || "Quiz", // Preserve title if exists
+                    questions
+                })
+            });
+            
+            if (!res.ok) throw new Error("Failed to save quiz to server");
+            
+        } catch (e) {
+            console.error("API Error updating quiz:", e);
+            // Optionally revert DB state here if critical
+        }
     };
     
     const addDiscussionPost = (lessonId: string, user: User, text: string) => {

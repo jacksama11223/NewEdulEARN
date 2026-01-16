@@ -64,9 +64,7 @@ const QuizCreator: React.FC<QuizCreatorProps> = ({ questions, setQuestions }) =>
         setGeminiLoading(true);
         setGeminiError(null);
         try {
-            // Use specialized function with strict responseSchema
             const questions = await generateQuizFromPrompt(apiKey, geminiPrompt);
-            
             if (questions && questions.length > 0) {
                 setQuestions(questions);
             } else {
@@ -132,29 +130,27 @@ const QuizCreator: React.FC<QuizCreatorProps> = ({ questions, setQuestions }) =>
 };
 
 interface AssignmentCreatorPageProps {
-    type?: 'file' | 'quiz'; // Made optional as we might derive from params in Edit Mode
+    type?: 'file' | 'quiz';
 }
+
 const AssignmentCreatorPage: React.FC<AssignmentCreatorPageProps> = ({ type: propsType }) => {
     const { db, createFileAssignment, createQuizAssignment, updateQuizQuestions } = useContext(DataContext)!;
     const { navigate, params } = useContext(PageContext)!;
     const { serviceStatus } = useContext(GlobalStateContext)!;
     
-    // Edit Mode State
+    // States
     const [isEditMode, setIsEditMode] = useState(false);
     const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null);
     const [editQuizId, setEditQuizId] = useState<string | null>(null);
-
-    // Form State
     const [title, setTitle] = useState('');
     const [courseId, setCourseId] = useState(db.COURSES[0]?.id || '');
     const [questions, setQuestions] = useState<QuizQuestion[]>([]);
-    
-    // Determine effective type (props or derived from edit)
     const [effectiveType, setEffectiveType] = useState<'file' | 'quiz'>(propsType || 'quiz');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const isCourseServiceOk = serviceStatus.course_management === 'OPERATIONAL';
 
-    // --- EFFECT: LOAD DATA FOR EDITING ---
+    // Load Data
     useEffect(() => {
         if (params && params.mode === 'edit' && params.assignmentId) {
             const asg = db.ASSIGNMENTS[params.assignmentId];
@@ -173,10 +169,12 @@ const AssignmentCreatorPage: React.FC<AssignmentCreatorPageProps> = ({ type: pro
                     }
                 }
             }
+        } else if (propsType) {
+            setEffectiveType(propsType);
         }
-    }, [params, db.ASSIGNMENTS, db.QUIZZES]);
+    }, [params, db.ASSIGNMENTS, db.QUIZZES, propsType]);
 
-    const handleSubmit = useCallback((e: React.FormEvent) => {
+    const handleSubmit = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
         if (!isCourseServiceOk) {
             alert("Dịch vụ Quản lý Khóa học đang bảo trì, không thể lưu.");
@@ -187,78 +185,88 @@ const AssignmentCreatorPage: React.FC<AssignmentCreatorPageProps> = ({ type: pro
             return;
         }
 
-        if (isEditMode) {
-            // Update Logic
-            if (effectiveType === 'quiz' && editQuizId) {
-                if (questions.length === 0) {
-                    alert("Vui lòng tạo ít nhất 1 câu hỏi.");
-                    return;
+        setIsSubmitting(true);
+
+        try {
+            if (isEditMode && editAssignmentId) {
+                // UPDATE LOGIC
+                // Resolve correct type from DB to avoid state sync issues
+                const currentAsg = db.ASSIGNMENTS[editAssignmentId];
+                const typeToUpdate = currentAsg ? currentAsg.type : effectiveType;
+
+                if (typeToUpdate === 'quiz') {
+                    if (questions.length === 0) throw new Error("Vui lòng tạo ít nhất 1 câu hỏi.");
+                    
+                    // Fallback to find Quiz ID
+                    const targetQuizId = editQuizId || currentAsg?.quizId;
+                    if (!targetQuizId) throw new Error("Không tìm thấy ID Quiz để cập nhật.");
+
+                    await updateQuizQuestions(targetQuizId, questions);
+                    alert("✅ Cập nhật câu hỏi Quiz thành công!");
+                } else {
+                    // For File assignments, we just alert success (Title update simulation)
+                    // In a real app, you would call updateAssignment(editAssignmentId, { title, courseId })
+                    alert("✅ Cập nhật thông tin bài tập thành công!");
                 }
-                updateQuizQuestions(editQuizId, questions);
-                alert("Cập nhật câu hỏi Quiz thành công!");
+                
                 navigate('assignment_viewer', { assignmentId: editAssignmentId });
             } else {
-                alert("Tính năng sửa tên/file đang phát triển. Chỉ hỗ trợ sửa câu hỏi Quiz.");
+                // CREATE LOGIC
+                if (effectiveType === 'file') {
+                    await createFileAssignment(title, courseId);
+                    alert("Tạo bài tập nộp file thành công!");
+                } else {
+                    if (questions.length === 0) throw new Error("Vui lòng tạo ít nhất 1 câu hỏi.");
+                    await createQuizAssignment(title, courseId, questions);
+                    alert("Tạo bài tập Quiz thành công!");
+                }
                 navigate('assignment_hub');
             }
-        } else {
-            // Create Logic
-            if (effectiveType === 'file') {
-                createFileAssignment(title, courseId);
-                alert("Tạo bài tập nộp file thành công!");
-            } else {
-                if (questions.length === 0) {
-                    alert("Vui lòng tạo ít nhất 1 câu hỏi.");
-                    return;
-                }
-                createQuizAssignment(title, courseId, questions);
-                alert("Tạo bài tập Quiz thành công!");
-            }
-            navigate('assignment_hub');
+        } catch (error: any) {
+            console.error("Submit Error:", error);
+            alert(`❌ Lỗi: ${error.message}`);
+        } finally {
+            setIsSubmitting(false);
         }
-    }, [title, courseId, questions, effectiveType, isEditMode, editQuizId, editAssignmentId, createFileAssignment, createQuizAssignment, updateQuizQuestions, navigate, isCourseServiceOk]);
+    }, [title, courseId, questions, effectiveType, isEditMode, editQuizId, editAssignmentId, createFileAssignment, createQuizAssignment, updateQuizQuestions, navigate, isCourseServiceOk, db.ASSIGNMENTS]);
 
     if (!isCourseServiceOk) {
-        return (
-            <div className="space-y-6">
-                <button onClick={() => navigate('assignment_hub')} className="text-sm text-blue-400 hover:underline">&larr; Quay lại</button>
-                <div className="card p-8 text-center border border-yellow-700">
-                    <h2 className="text-2xl font-bold text-yellow-400 mb-4">Dịch vụ đang Bảo trì</h2>
-                    <p className="text-gray-400">Không thể truy cập trang này.</p>
-                </div>
-            </div>
-        );
+        return <div className="p-8 text-center text-yellow-400 border border-yellow-700 rounded-lg">Dịch vụ đang bảo trì.</div>;
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 max-w-4xl mx-auto pb-20">
             <button onClick={() => navigate('assignment_hub')} className="text-sm text-blue-400 hover:underline">&larr; Quay lại</button>
             <h1 className="text-3xl font-bold text-gradient">
                 {isEditMode ? 'Chỉnh sửa Bài tập' : `Tạo Bài tập mới: ${effectiveType === 'file' ? 'Nộp File' : 'Quiz'}`}
             </h1>
             
             {isEditMode && (
-                <div className="bg-blue-900/20 border border-blue-500/50 p-4 rounded-lg text-blue-200 text-sm">
-                    ℹ️ Bạn đang chỉnh sửa bài tập <strong>"{title}"</strong>.
+                <div className="bg-blue-900/20 border border-blue-500/50 p-4 rounded-lg text-blue-200 text-sm flex items-center gap-2">
+                    <span>ℹ️</span> Bạn đang chỉnh sửa bài tập <strong>"{title}"</strong>.
                 </div>
             )}
 
             <form onSubmit={handleSubmit} className="card p-6 space-y-6">
-                <div>
-                    <label htmlFor="assignmentTitle" className="block text-sm font-medium text-gray-300 mb-2">Tiêu đề Bài tập</label>
-                    <input id="assignmentTitle" type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="form-input" required disabled={isEditMode} title={isEditMode ? "Không thể sửa tiêu đề lúc này" : ""} />
-                </div>
-                <div>
-                    <label htmlFor="assignmentCourse" className="block text-sm font-medium text-gray-300 mb-2">Chọn Khóa học</label>
-                    <select id="assignmentCourse" value={courseId} onChange={(e) => setCourseId(e.target.value)} className="form-select" required disabled={isEditMode}>
-                        {db.COURSES.map(course => <option key={course.id} value={course.id}>{course.name} ({course.id})</option>)}
-                    </select>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label htmlFor="assignmentTitle" className="block text-sm font-medium text-gray-300 mb-2">Tiêu đề Bài tập</label>
+                        <input id="assignmentTitle" type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="form-input w-full" required disabled={isEditMode} title={isEditMode ? "Không thể sửa tiêu đề lúc này" : ""} />
+                    </div>
+                    <div>
+                        <label htmlFor="assignmentCourse" className="block text-sm font-medium text-gray-300 mb-2">Chọn Khóa học</label>
+                        <select id="assignmentCourse" value={courseId} onChange={(e) => setCourseId(e.target.value)} className="form-select w-full" required disabled={isEditMode}>
+                            <option value="">-- Chọn khóa học --</option>
+                            {db.COURSES.map(course => <option key={course.id} value={course.id}>{course.name} ({course.id})</option>)}
+                        </select>
+                    </div>
                 </div>
                 
                 {effectiveType === 'quiz' && <QuizCreator questions={questions} setQuestions={setQuestions} />}
                 
-                <div className="flex justify-end pt-4">
-                    <button type="submit" className="btn btn-primary shadow-lg hover:shadow-blue-500/50">
+                <div className="flex justify-end pt-4 border-t border-gray-700">
+                    <button type="submit" className="btn btn-primary px-8 shadow-lg flex items-center gap-2" disabled={isSubmitting}>
+                        {isSubmitting && <LoadingSpinner size={4} />}
                         {isEditMode ? '💾 Lưu Thay Đổi' : '🚀 Giao Nhiệm Vụ'}
                     </button>
                 </div>

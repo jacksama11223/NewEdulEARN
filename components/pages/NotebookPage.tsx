@@ -1,12 +1,11 @@
 
-// ... existing imports ...
 import React, { useState, useContext, useMemo, useEffect, useCallback, useRef } from 'react';
 import { AuthContext, DataContext, GlobalStateContext, PageContext, PetContext } from '../../contexts/AppProviders';
 import { enhanceNoteWithGemini, callGeminiApi, transformNoteToLesson, refineTextWithOracle, checkNoteConnections } from '../../services/geminiService';
 import LoadingSpinner from '../common/LoadingSpinner';
 import Modal from '../common/Modal'; 
 import OnboardingTour, { TourStep } from '../common/OnboardingTour';
-import type { PersonalNote, StudyGroup, User, Course } from '../../types';
+import type { PersonalNote, StudyGroup, User, Course, Flashcard } from '../../types';
 
 // ... existing helper insertTextAtCursor ...
 const insertTextAtCursor = (input: HTMLTextAreaElement, prefix: string, suffix: string) => {
@@ -68,9 +67,14 @@ const NotebookPage: React.FC = () => {
     const [showLinkSuggestions, setShowLinkSuggestions] = useState(false);
     const [linkSearchTerm, setLinkSearchTerm] = useState('');
     
-    // --- NEW: INTERACTIVE TOOLTIP STATE ---
+    // --- INTERACTIVE TOOLTIP STATE ---
     const [selectedText, setSelectedText] = useState('');
     const [tooltipPos, setTooltipPos] = useState<{ top: number, left: number } | null>(null);
+
+    // --- NEW: DRAFTING DECK STATE ---
+    const [draftCards, setDraftCards] = useState<{front: string, back: string}[]>([]);
+    const [draftDeckTitle, setDraftDeckTitle] = useState('');
+    const [isDraftEditorOpen, setIsDraftEditorOpen] = useState(false);
 
     // ONBOARDING TOUR STATE
     const [isTourOpen, setIsTourOpen] = useState(false);
@@ -195,18 +199,7 @@ const NotebookPage: React.FC = () => {
 
     // --- TEXT SELECTION HANDLER ---
     const handleTextSelect = () => {
-        const selection = window.getSelection();
-        if (selection && selection.toString().trim().length > 0 && textareaRef.current && textareaRef.current.contains(selection.anchorNode)) {
-            // Get position relative to viewport but clamp to text area
-            // Actually, for textarea, standard selection Rect might be tricky if it's plain text.
-            // But we can approximate using mouseup event coordinates if needed, 
-            // or just center it over the textarea if precise positioning is hard.
-            // Let's use a simple approach: if selection exists, check mouse position from event? 
-            // Better: use the event passed to onMouseUp
-        } else {
-            setTooltipPos(null);
-            setSelectedText('');
-        }
+        // ... (Not used, relying on MouseUp)
     };
 
     const handleMouseUp = (e: React.MouseEvent) => {
@@ -236,21 +229,21 @@ const NotebookPage: React.FC = () => {
         triggerReaction('note');
     };
 
-    const handleManualCreateFlashcard = () => {
+    // UPDATED: ADD TO DRAFT DECK
+    const handleAddToDraftDeck = () => {
         if (!selectedText) return;
-        const deckName = `Inbox Deck (${new Date().toLocaleDateString()})`;
-        // Create a simple deck or add to existing 'Inbox' if logic allows. 
-        // For now, simple create new deck with 1 card.
-        createFlashcardDeck(deckName, [{
-            id: `fc_${Date.now()}`,
-            front: selectedText,
-            back: "...", // User fills later
-            box: 0, 
-            nextReview: 0
-        }]);
+        
+        // Initialize deck title if it's the first card
+        if (draftCards.length === 0 && !draftDeckTitle) {
+            setDraftDeckTitle(`Flashcards: ${title || 'Ghi chú'}`);
+        }
+
+        // Add to Draft: Back = Text, Front = Empty
+        setDraftCards(prev => [...prev, { front: '', back: selectedText }]);
         setTooltipPos(null);
-        alert("🃏 Đã tạo Flashcard mới trong Inbox Deck! Hãy vào sửa mặt sau.");
+        
         triggerReaction('success');
+        // Visual feedback is handled by the Floating Tray appearing
     };
 
     const handleManualCopy = () => {
@@ -259,6 +252,44 @@ const NotebookPage: React.FC = () => {
         // Visual feedback
         const btn = document.getElementById('btn-copy-manual');
         if(btn) btn.innerText = "Copied!";
+    };
+
+    // --- DRAFT DECK HANDLERS ---
+    const handleSaveDraftDeck = () => {
+        if (draftCards.length === 0) return;
+        if (!draftDeckTitle.trim()) {
+            alert("Vui lòng đặt tên cho bộ thẻ.");
+            return;
+        }
+        
+        // Convert draft to real Flashcards
+        const realCards: Flashcard[] = draftCards.map((c, i) => ({
+            id: `fc_draft_${Date.now()}_${i}`,
+            front: c.front || 'Câu hỏi...',
+            back: c.back,
+            box: 0,
+            nextReview: 0
+        }));
+
+        createFlashcardDeck(draftDeckTitle, realCards);
+        
+        alert(`✅ Đã tạo bộ thẻ "${draftDeckTitle}" với ${realCards.length} thẻ thành công!`);
+        // Reset Draft
+        setDraftCards([]);
+        setDraftDeckTitle('');
+        setIsDraftEditorOpen(false);
+    };
+
+    const handleUpdateDraftCard = (index: number, field: 'front' | 'back', value: string) => {
+        const newCards = [...draftCards];
+        newCards[index][field] = value;
+        setDraftCards(newCards);
+    };
+
+    const handleRemoveDraftCard = (index: number) => {
+        const newCards = draftCards.filter((_, i) => i !== index);
+        setDraftCards(newCards);
+        if (newCards.length === 0) setIsDraftEditorOpen(false);
     };
 
     // ... existing handlers ...
@@ -548,9 +579,22 @@ const NotebookPage: React.FC = () => {
                         <button onClick={handleManualCreateTask} className="btn btn-xs bg-green-600 hover:bg-green-500 text-white flex items-center gap-1">
                             ✅ Task
                         </button>
-                        <button onClick={handleManualCreateFlashcard} className="btn btn-xs bg-yellow-600 hover:bg-yellow-500 text-black font-bold flex items-center gap-1">
-                            🃏 Card
+                        
+                        {/* CHANGED: Add to Draft Deck instead of Direct Create */}
+                        <button 
+                            onClick={() => {
+                                if (selectedText) {
+                                    setDraftCards([...draftCards, { front: '', back: selectedText }]);
+                                    setTooltipPos(null);
+                                    if (!draftDeckTitle) setDraftDeckTitle(`Flashcards: ${title || 'Ghi chú mới'}`);
+                                    triggerReaction('success');
+                                }
+                            }}
+                            className="btn btn-xs bg-yellow-600 hover:bg-yellow-500 text-black font-bold flex items-center gap-1"
+                        >
+                            ➕ Soạn Thẻ
                         </button>
+
                         <button id="btn-copy-manual" onClick={handleManualCopy} className="btn btn-xs bg-gray-700 hover:bg-gray-600 text-white flex items-center gap-1">
                             📋 Copy
                         </button>
@@ -558,6 +602,133 @@ const NotebookPage: React.FC = () => {
                     <div className="w-2 h-2 bg-gray-900 border-b border-r border-blue-500/50 transform rotate-45 self-center -mt-1"></div>
                 </div>
             )}
+
+            {/* DRAFTING TRAY (FLOATING) */}
+            {draftCards.length > 0 && (
+                <div className="fixed bottom-6 right-6 z-[60] bg-gray-900/90 backdrop-blur-xl border border-yellow-500/50 rounded-2xl shadow-[0_0_30px_rgba(234,179,8,0.3)] p-4 animate-slide-up w-72 flex flex-col gap-3">
+                    <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                        <span className="text-yellow-400 font-bold text-sm uppercase tracking-wider flex items-center gap-2">
+                            <span>🗂️</span> Đang soạn ({draftCards.length})
+                        </span>
+                        <button onClick={() => setDraftCards([])} className="text-gray-500 hover:text-white text-xs">✕ Hủy</button>
+                    </div>
+                    
+                    <input 
+                        type="text" 
+                        className="bg-black/30 border border-gray-600 rounded text-xs px-2 py-1.5 text-white focus:border-yellow-500 w-full"
+                        placeholder="Tên bộ thẻ..."
+                        value={draftDeckTitle}
+                        onChange={e => setDraftDeckTitle(e.target.value)}
+                    />
+
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => setIsDraftEditorOpen(true)}
+                            className="btn btn-xs flex-1 bg-gray-700 hover:bg-gray-600 border border-gray-500"
+                        >
+                            ✏️ Chỉnh sửa
+                        </button>
+                        <button 
+                            onClick={() => {
+                                if (!draftDeckTitle.trim()) { alert("Đặt tên bộ thẻ trước đã!"); return; }
+                                const realCards = draftCards.map((c, i) => ({
+                                    id: `fc_draft_${Date.now()}_${i}`,
+                                    front: c.front || 'Câu hỏi...',
+                                    back: c.back,
+                                    box: 0, nextReview: 0
+                                }));
+                                createFlashcardDeck(draftDeckTitle, realCards);
+                                alert(`✅ Đã tạo bộ thẻ "${draftDeckTitle}" thành công!`);
+                                setDraftCards([]);
+                                setDraftDeckTitle('');
+                            }}
+                            className="btn btn-xs flex-1 btn-primary bg-yellow-600 hover:bg-yellow-500 text-black font-bold"
+                        >
+                            💾 Lưu Ngay
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* DRAFT EDITOR MODAL */}
+            <Modal isOpen={isDraftEditorOpen} onClose={() => setIsDraftEditorOpen(false)} title="Biên tập Bộ Thẻ (Draft)" size="lg">
+                <div className="space-y-4 p-2 h-[60vh] flex flex-col">
+                    <div className="flex justify-between items-center bg-gray-800 p-3 rounded-lg">
+                        <input 
+                            type="text" 
+                            className="bg-transparent text-lg font-bold text-white outline-none w-full placeholder-gray-500"
+                            placeholder="Nhập tên bộ thẻ..."
+                            value={draftDeckTitle}
+                            onChange={e => setDraftDeckTitle(e.target.value)}
+                        />
+                        <span className="text-xs text-gray-400 whitespace-nowrap ml-2">{draftCards.length} thẻ</span>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2">
+                        {draftCards.map((card, idx) => (
+                            <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col gap-2 relative group">
+                                <button 
+                                    onClick={() => setDraftCards(prev => prev.filter((_, i) => i !== idx))}
+                                    className="absolute top-2 right-2 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                    ✕
+                                </button>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] text-blue-300 font-bold uppercase">Mặt trước (Câu hỏi)</label>
+                                        <input 
+                                            className="bg-black/30 border border-gray-600 rounded p-2 text-sm text-white focus:border-blue-500 outline-none"
+                                            placeholder="Nhập thuật ngữ..."
+                                            value={card.front}
+                                            onChange={e => {
+                                                const newCards = [...draftCards];
+                                                newCards[idx].front = e.target.value;
+                                                setDraftCards(newCards);
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] text-green-300 font-bold uppercase">Mặt sau (Đáp án)</label>
+                                        <textarea 
+                                            className="bg-black/30 border border-gray-600 rounded p-2 text-sm text-gray-300 focus:border-green-500 outline-none resize-none h-20"
+                                            value={card.back}
+                                            onChange={e => {
+                                                const newCards = [...draftCards];
+                                                newCards[idx].back = e.target.value;
+                                                setDraftCards(newCards);
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="flex justify-end pt-2 border-t border-white/10 gap-3">
+                        <button onClick={() => setIsDraftEditorOpen(false)} className="btn btn-secondary">Đóng (Giữ Nháp)</button>
+                        <button 
+                            onClick={() => {
+                                if (!draftDeckTitle.trim()) { alert("Đặt tên bộ thẻ trước đã!"); return; }
+                                const realCards = draftCards.map((c, i) => ({
+                                    id: `fc_draft_${Date.now()}_${i}`,
+                                    front: c.front || 'Câu hỏi...',
+                                    back: c.back,
+                                    box: 0, nextReview: 0
+                                }));
+                                createFlashcardDeck(draftDeckTitle, realCards);
+                                alert(`✅ Đã lưu bộ thẻ thành công!`);
+                                setDraftCards([]);
+                                setDraftDeckTitle('');
+                                setIsDraftEditorOpen(false);
+                            }} 
+                            className="btn btn-primary bg-yellow-600 hover:bg-yellow-500 text-black font-bold shadow-lg"
+                        >
+                            💾 Lưu vào Inbox Deck
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             <div className="w-1/5 min-w-[200px] flex flex-col gap-4 hidden md:flex">
                 <div className="p-4 bg-black/30 backdrop-blur-xl border border-white/10 rounded-2xl shadow-lg">

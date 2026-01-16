@@ -4,6 +4,7 @@ import { MOCK_DATA } from '../data/mockData.ts';
 import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson } from '../types.ts';
 import { convertContentToFlashcards, generateLegacyArchiveContent } from '../services/geminiService.ts';
 import { io, Socket } from 'socket.io-client';
+import { SKIN_CONFIG } from '../components/common/SkinConfig.ts'; // Import Skin Config
 
 // --- CONFIG URL BACKEND ---
 const getBackendUrl = () => {
@@ -28,20 +29,22 @@ const SOUNDS = {
     notification: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
     // Gửi tin nhắn đi (nhẹ nhàng)
     sent: 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3', 
-    // Thành công (Nộp bài, Tạo thẻ, Lưu note)
+    // Thành công (Nộp bài, Tạo thẻ, Lưu note) - Tiếng "Ting" nhẹ
     success: 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3', 
-    // Mua đồ / Nhận tiền (Coin sound)
+    // Mua đồ / Tiêu tiền (Coin sound)
     cash: 'https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3',
-    // Lên cấp / Hoàn thành bài học (Fanfare)
+    // Lên cấp / Hoàn thành bài học (Fanfare nhỏ)
     level_up: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3',
     // Lỗi / Xóa (Thud)
     error: 'https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3',
     // Click UI (Mouse Interaction)
     click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
-    // Tiếng gõ phím (Keyboard Typing)
-    keyboard: 'https://assets.mixkit.co/active_storage/sfx/236/236-preview.mp3', 
     // Tiếng hover nhẹ hoặc tap vào phần tử nhỏ
-    tap: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'
+    tap: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3',
+    // NEW: Tiếng ăn mừng lớn (Victory/Celebration) - Dùng khi đạt điểm cao, streak
+    celebration: 'https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3', 
+    // NEW: Tiếng nhận thưởng (Pop/Collect) - Dùng khi nhặt rác, nhận quà
+    reward: 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3' 
 };
 
 type SoundType = keyof typeof SOUNDS;
@@ -220,22 +223,81 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     // --- ENHANCED SOUND SYSTEM ---
+    // Ref for Theme Music Audio to control it across renders
+    const themeAudioRef = useRef<HTMLAudioElement | null>(null);
+    const themeFadeIntervalRef = useRef<number | null>(null);
+
     const playSound = (type: SoundType) => {
         const url = SOUNDS[type];
         if (!url) return;
         const audio = new Audio(url);
         
         // Volume Mix
-        if (type === 'keyboard') audio.volume = 0.15; // Subtle typing
-        else if (type === 'click') audio.volume = 0.2; // Gentle clicks
+        if (type === 'click') audio.volume = 0.2; // Gentle clicks
         else if (type === 'tap') audio.volume = 0.1;
         else if (type === 'sent') audio.volume = 0.3;
-        else audio.volume = 0.5; // Events are louder
+        else if (type === 'celebration') audio.volume = 0.6; // Louder for celebration
+        else if (type === 'reward') audio.volume = 0.5;
+        else audio.volume = 0.5; 
 
         audio.play().catch(e => {
             // Ignore auto-play blocking errors for rapid interactions
         });
     };
+
+    // --- THEME MUSIC PLAYER (EFFECT) ---
+    // Listens to skin changes and plays associated ambience
+    useEffect(() => {
+        const skinId = db.GAMIFICATION.equippedSkin;
+        const skinConfig = SKIN_CONFIG[skinId];
+        
+        if (skinConfig && skinConfig.musicUrl) {
+            // Stop existing theme music if any
+            if (themeAudioRef.current) {
+                themeAudioRef.current.pause();
+                themeAudioRef.current.currentTime = 0;
+            }
+            if (themeFadeIntervalRef.current) {
+                clearInterval(themeFadeIntervalRef.current);
+            }
+
+            // Init new audio
+            const audio = new Audio(skinConfig.musicUrl);
+            themeAudioRef.current = audio;
+            audio.volume = 0.3; // Base volume for ambience
+            audio.loop = false;
+
+            const playPromise = audio.play();
+            
+            if (playPromise !== undefined) {
+                playPromise
+                .then(() => {
+                    // Logic: Play for 7s full volume, then fade out over 3s (Total 10s)
+                    setTimeout(() => {
+                        // Start Fading Out
+                        const fadeStep = 0.05; // Amount to decrease
+                        const fadeIntervalTime = 150; // Every 150ms
+                        
+                        themeFadeIntervalRef.current = window.setInterval(() => {
+                            if (audio.volume > fadeStep) {
+                                audio.volume -= fadeStep;
+                            } else {
+                                // Stop completely
+                                audio.volume = 0;
+                                audio.pause();
+                                if (themeFadeIntervalRef.current) clearInterval(themeFadeIntervalRef.current);
+                            }
+                        }, fadeIntervalTime);
+
+                    }, 7000); // Wait 7s before fading
+                })
+                .catch(error => {
+                    // Auto-play was prevented
+                    console.log("Theme music auto-play prevented:", error);
+                });
+            }
+        }
+    }, [db.GAMIFICATION.equippedSkin]); // Trigger on skin change
 
     // --- GLOBAL SOUND LISTENERS ---
     useEffect(() => {
@@ -248,28 +310,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (isInteractive) {
                 // Play 'click' sound for interactive elements
                 playSound('click');
-            } else {
-                // Optional: Play a very faint 'tap' for background clicks if desired, 
-                // but usually better to keep silence for void clicks to emphasize UI.
-                // playSound('tap'); 
             }
         };
 
-        const handleGlobalTyping = (e: KeyboardEvent) => {
-            // Filter out modifier keys held alone
-            if (['Control', 'Shift', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return;
-            
-            // Play typing sound for any character or navigation
-            playSound('keyboard');
-        };
+        // Removed Keyboard Listener as requested
 
         // Use 'mousedown' for instant feedback before 'click' logic fires
         window.addEventListener('mousedown', handleGlobalInteraction);
-        window.addEventListener('keydown', handleGlobalTyping);
 
         return () => {
             window.removeEventListener('mousedown', handleGlobalInteraction);
-            window.removeEventListener('keydown', handleGlobalTyping);
         };
     }, []);
 
@@ -573,7 +623,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const percentage = total > 0 ? (score/total)*100 : 0;
         
         // Sound logic for quiz
-        if (percentage >= 80) playSound('level_up');
+        if (percentage >= 100) playSound('celebration'); // Perfect score
+        else if (percentage >= 80) playSound('level_up');
         else playSound('success');
 
         const submissionPayload = { quizId, studentId: userId, score, total, percentage, answers, timestamp: new Date().toISOString() };
@@ -648,7 +699,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const completeOnboarding = (userId: string) => { 
-        playSound('success');
+        playSound('celebration'); // Welcome fanfare
         setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], hasSeenOnboarding: true } } })); 
     };
     const dismissAnnouncement = (id: string) => { setDb(prev => ({ ...prev, ANNOUNCEMENTS: prev.ANNOUNCEMENTS.filter(a => a.id !== id) })); };
@@ -671,13 +722,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const checkDailyDiamondReward = () => {
         const today = new Date().toDateString();
         if (db.GAMIFICATION.lastStudyDate !== today) {
+            playSound('celebration'); // Big daily reward
             setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds + 5, lastStudyDate: today, streakDays: prev.GAMIFICATION.streakDays + 1 } }));
             return true;
         }
         return false;
     };
     const unlockSecretReward = (userId: string, type: 'skin'|'diamond', value: string|number) => {
-        playSound('level_up');
+        playSound('celebration'); // Rare find
         setDb(prev => {
             const newState = { ...prev.GAMIFICATION };
             if (type === 'diamond') newState.diamonds += (value as number);
@@ -686,7 +738,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
     const collectSpaceJunk = (junk: SpaceJunk) => { 
-        playSound('success');
+        playSound('reward'); // Pop sound for collection
         setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, junkInventory: [...prev.GAMIFICATION.junkInventory, junk] } })); 
     };
     const recycleSpaceJunk = (junkId: string) => {

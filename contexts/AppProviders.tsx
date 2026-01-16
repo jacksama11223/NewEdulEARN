@@ -113,7 +113,9 @@ export interface DataContextType {
     sendReward: (teacherId: string, studentId: string, type: 'diamond' | 'item', value: number | string, message: string) => void;
 
     // Study & Learning
-    createFlashcardDeck: (title: string, cards: Flashcard[]) => void;
+    createFlashcardDeck: (userId: string, title: string, cards: Flashcard[]) => void;
+    deleteFlashcardDeck: (deckId: string) => void; // NEW
+    renameFlashcardDeck: (deckId: string, newTitle: string) => void; // NEW
     addFlashcardToDeck: (deckId: string, cards: Flashcard[]) => void;
     updateFlashcardInDeck: (deckId: string, card: Flashcard) => void;
     createStandaloneQuiz: (title: string, questions: QuizQuestion[]) => void;
@@ -518,17 +520,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const fetchUserData = useCallback(async (userId: string) => {
         try {
             console.log("Fetching user data for:", userId);
-            const [notesRes, tasksRes, chatRes, groupsRes, groupChatRes, pathsRes] = await Promise.all([
+            const [notesRes, tasksRes, chatRes, groupsRes, groupChatRes, pathsRes, decksRes] = await Promise.all([
                 fetch(`${BACKEND_URL}/notes/${userId}`),
                 fetch(`${BACKEND_URL}/tasks/${userId}`),
                 fetch(`${BACKEND_URL}/chat/history/${userId}`),
                 fetch(`${BACKEND_URL}/groups`),
                 fetch(`${BACKEND_URL}/group-chat/all`),
-                fetch(`${BACKEND_URL}/paths/${userId}`)
+                fetch(`${BACKEND_URL}/paths/${userId}`),
+                fetch(`${BACKEND_URL}/decks/${userId}`) // NEW: Fetch Decks
             ]);
 
-            const [notes, tasks, chatMessages, groups, groupMessages, paths] = await Promise.all([
-                notesRes.json(), tasksRes.json(), chatRes.json(), groupsRes.json(), groupChatRes.json(), pathsRes.json()
+            const [notes, tasks, chatMessages, groups, groupMessages, paths, decks] = await Promise.all([
+                notesRes.json(), tasksRes.json(), chatRes.json(), groupsRes.json(), groupChatRes.json(), pathsRes.json(), decksRes.json()
             ]);
 
             const notesMap: Record<string, PersonalNote> = {};
@@ -555,6 +558,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const pathsMap: Record<string, LearningPath> = {};
             (paths as LearningPath[]).forEach((p: any) => { pathsMap[p.id] = { ...p, id: p.id || p._id }; });
 
+            const decksMap: Record<string, FlashcardDeck> = {};
+            (decks as FlashcardDeck[]).forEach((d: any) => { decksMap[d.id] = { ...d, id: d.id || d._id }; });
+
             setDb(prev => ({
                 ...prev,
                 PERSONAL_NOTES: notesMap,
@@ -562,7 +568,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, ...chatMap },
                 STUDY_GROUPS: formattedGroups,
                 GROUP_CHAT_MESSAGES: groupChatMap,
-                LEARNING_PATHS: pathsMap
+                LEARNING_PATHS: pathsMap,
+                FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, ...decksMap } // Merge decks
             }));
 
             // Socket: Join group rooms now that we know them
@@ -881,23 +888,78 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         sendChatMessage(teacherId, studentId, message, undefined, undefined, undefined, undefined, rewardData);
     };
 
-    const createFlashcardDeck = (title: string, cards: Flashcard[]) => { 
+    const createFlashcardDeck = (userId: string, title: string, cards: Flashcard[]) => { 
         playSound('success');
-        setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [`fd_${Date.now()}`]: { id: `fd_${Date.now()}`, title, cards } } })); 
+        const deckId = `fd_${Date.now()}`;
+        const newDeck = { id: deckId, userId, title, cards };
+        
+        setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: newDeck } })); 
+        
+        // Persist to Backend
+        fetch(`${BACKEND_URL}/decks`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(newDeck) 
+        }).catch(err => console.error("Failed to save deck:", err));
     };
+
+    const deleteFlashcardDeck = async (deckId: string) => {
+        playSound('error');
+        setDb(prev => {
+            const newDecks = { ...prev.FLASHCARD_DECKS };
+            delete newDecks[deckId];
+            return { ...prev, FLASHCARD_DECKS: newDecks };
+        });
+        try {
+            await fetch(`${BACKEND_URL}/decks/${deckId}`, { method: 'DELETE' });
+        } catch (e) { console.error("Failed to delete deck:", e); }
+    };
+
+    const renameFlashcardDeck = async (deckId: string, newTitle: string) => {
+        setDb(prev => {
+            const deck = prev.FLASHCARD_DECKS[deckId];
+            if (!deck) return prev;
+            return { ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: { ...deck, title: newTitle } } };
+        });
+        try {
+            await fetch(`${BACKEND_URL}/decks/${deckId}`, { 
+                method: 'PUT', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ title: newTitle }) 
+            });
+        } catch (e) { console.error("Failed to rename deck:", e); }
+    };
+
     const addFlashcardToDeck = (deckId: string, cards: Flashcard[]) => {
         setDb(prev => {
             const deck = prev.FLASHCARD_DECKS[deckId];
             if (!deck) return prev;
-            return { ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: { ...deck, cards: [...deck.cards, ...cards] } } };
+            const updatedDeck = { ...deck, cards: [...deck.cards, ...cards] };
+            
+            fetch(`${BACKEND_URL}/decks/${deckId}`, { 
+                method: 'PUT', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(updatedDeck) 
+            });
+
+            return { ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: updatedDeck } };
         });
     };
+
     const updateFlashcardInDeck = (deckId: string, card: Flashcard) => {
         setDb(prev => {
             const deck = prev.FLASHCARD_DECKS[deckId];
             if (!deck) return prev;
             const newCards = deck.cards.map(c => c.id === card.id ? card : c);
-            return { ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: { ...deck, cards: newCards } } };
+            const updatedDeck = { ...deck, cards: newCards };
+
+            fetch(`${BACKEND_URL}/decks/${deckId}`, { 
+                method: 'PUT', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(updatedDeck) 
+            });
+
+            return { ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [deckId]: updatedDeck } };
         });
     };
 
@@ -1178,7 +1240,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             registerUser, completeOnboarding, dismissAnnouncement, markNotificationRead, buyShopItem, equipShopItem, equipPet,
             checkDailyDiamondReward, unlockSecretReward, collectSpaceJunk, recycleSpaceJunk, awardXP, restoreStreak,
             recordSpeedRunResult, sendChatMessage, sendGroupMessage, deleteGroupMessage, joinGroup, createGroup, createRaidParty, resolveSOS, processTrade,
-            createFlashcardDeck, addFlashcardToDeck, updateFlashcardInDeck, createStandaloneQuiz, updateScratchpad, createPersonalNote, updatePersonalNote,
+            createFlashcardDeck, deleteFlashcardDeck, renameFlashcardDeck, addFlashcardToDeck, updateFlashcardInDeck, createStandaloneQuiz, updateScratchpad, createPersonalNote, updatePersonalNote,
             deletePersonalNote, saveNodeNote, savePdfToNote, getPdfForNote, removePdfFromNote, shareNoteToSquadron, unshareNote,
             unlockSharedNote, addNoteComment, createLearningPath, assignLearningPath, updateNodeProgress, unlockNextNode, extendLearningPath,
             skipLearningPath, addTask, toggleTaskCompletion, deleteTask, archiveCompletedTasks, createFileAssignment, createQuizAssignment, createBossChallenge, sendIntervention,

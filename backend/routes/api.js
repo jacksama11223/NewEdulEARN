@@ -14,6 +14,7 @@ import LearningPath from '../models/LearningPath.js';
 import Quiz from '../models/Quiz.js';
 import QuizSubmission from '../models/QuizSubmission.js';
 import User from '../models/User.js';
+import FlashcardDeck from '../models/FlashcardDeck.js'; // NEW IMPORT
 
 const router = express.Router();
 
@@ -63,11 +64,6 @@ router.delete('/users/:id', async (req, res) => {
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
-
-        // Optional: Cascade delete related data if needed
-        // await PersonalNote.deleteMany({ userId: id });
-        // await Task.deleteMany({ userId: id });
-
         res.json({ message: "User deleted successfully", id });
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -212,7 +208,7 @@ router.put('/tasks/:id', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
-// --- CHAT SYSTEM (1-1) - REAL-TIME UPDATED ---
+// --- CHAT SYSTEM (1-1) ---
 router.get('/chat/history/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
@@ -228,22 +224,17 @@ router.get('/chat/history/:userId', async (req, res) => {
 router.post('/chat/send', async (req, res) => {
     try {
         const newMessage = await ChatMessage.create(req.body);
-        
-        // Broadcast via Socket.IO
-        // Send to the recipient's personal room
         if (req.io) {
             req.io.to(newMessage.to).emit('receive_message', newMessage);
-            // Also emit back to sender (useful for multi-device sync)
             req.io.to(newMessage.from).emit('receive_message', newMessage);
         }
-
         res.status(201).json(newMessage);
     } catch (error) {
         res.status(400).json({ message: error.message });
     }
 });
 
-// --- GROUP SYSTEM - REAL-TIME UPDATED ---
+// --- GROUP SYSTEM ---
 router.get('/groups', async (req, res) => {
     try {
         const groups = await StudyGroup.find({});
@@ -280,12 +271,9 @@ router.get('/group-chat/all', async (req, res) => {
 router.post('/group-chat/send', async (req, res) => {
     try {
         const message = await GroupMessage.create(req.body);
-        
-        // Broadcast via Socket.IO to the specific Group Room
         if (req.io) {
             req.io.to(message.groupId).emit('receive_group_message', message);
         }
-
         res.status(201).json(message);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -293,16 +281,10 @@ router.post('/group-chat/send', async (req, res) => {
 router.delete('/group-chat/:msgId', async (req, res) => {
     try {
         const message = await GroupMessage.findOneAndDelete({ id: req.params.msgId });
-        
-        if (!message) {
-            return res.status(404).json({ message: "Message not found" });
-        }
-
-        // Broadcast delete event via Socket.IO to Group Room
+        if (!message) return res.status(404).json({ message: "Message not found" });
         if (req.io) {
             req.io.to(message.groupId).emit('group_message_deleted', { msgId: message.id, groupId: message.groupId });
         }
-
         res.json({ message: "Group message deleted successfully" });
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
@@ -315,12 +297,9 @@ router.put('/group-chat/:msgId/resolve', async (req, res) => {
             { sosStatus: 'RESOLVED', rescuerName },
             { new: true }
         );
-        
-        // Emit update to group so UI updates instantly
         if (req.io && message) {
             req.io.to(message.groupId).emit('receive_group_message_update', message);
         }
-
         res.json(message);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -336,8 +315,6 @@ router.get('/paths/:userId', async (req, res) => {
 router.post('/paths', async (req, res) => {
     try {
         const path = await LearningPath.create(req.body);
-        
-        // REAL-TIME NOTIFICATION LOGIC
         if (req.io) {
             req.io.to(req.body.creatorId).emit('receive_notification', {
                 id: `notif_${Date.now()}`,
@@ -346,7 +323,6 @@ router.post('/paths', async (req, res) => {
                 timestamp: new Date()
             });
         }
-
         res.status(201).json(path);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -356,6 +332,36 @@ router.put('/paths/:id', async (req, res) => {
         const path = await LearningPath.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
         res.json(path);
     } catch (error) { res.status(400).json({ message: error.message }); }
+});
+
+// --- FLASHCARD DECKS (NEW CRUD) ---
+router.get('/decks/:userId', async (req, res) => {
+    try {
+        // Fetch decks created by user + standard course decks
+        const decks = await FlashcardDeck.find({ userId: req.params.userId });
+        res.json(decks);
+    } catch (error) { res.status(500).json({ message: error.message }); }
+});
+
+router.post('/decks', async (req, res) => {
+    try {
+        const deck = await FlashcardDeck.create(req.body);
+        res.status(201).json(deck);
+    } catch (error) { res.status(400).json({ message: error.message }); }
+});
+
+router.put('/decks/:id', async (req, res) => {
+    try {
+        const deck = await FlashcardDeck.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+        res.json(deck);
+    } catch (error) { res.status(400).json({ message: error.message }); }
+});
+
+router.delete('/decks/:id', async (req, res) => {
+    try {
+        await FlashcardDeck.findOneAndDelete({ id: req.params.id });
+        res.json({ message: "Deleted" });
+    } catch (error) { res.status(500).json({ message: error.message }); }
 });
 
 export default router;

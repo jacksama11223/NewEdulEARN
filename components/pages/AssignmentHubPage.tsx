@@ -191,7 +191,7 @@ const AiCommander: React.FC<{ recommendedTask: any, onClick: () => void }> = ({ 
 
 const AssignmentHubPage: React.FC = () => {
     const { user } = useContext(AuthContext)!;
-    const { db, addTask } = useContext(DataContext)!; 
+    const { db, addTask, deleteFlashcardDeck, renameFlashcardDeck } = useContext(DataContext)!; 
     const { navigate, params } = useContext(PageContext)!; 
     const { serviceStatus } = useContext(GlobalStateContext)!;
     const { triggerReaction } = useContext(PetContext)!;
@@ -264,6 +264,22 @@ const AssignmentHubPage: React.FC = () => {
 
     const handleClearFilter = () => {
         navigate('assignment_hub', {}); 
+    };
+
+    // --- DECK MANAGEMENT ---
+    const handleDeleteDeck = (e: React.MouseEvent, deckId: string) => {
+        e.stopPropagation();
+        if (confirm("Bạn chắc chắn muốn xóa bộ thẻ này? Hành động không thể hoàn tác.")) {
+            deleteFlashcardDeck(deckId);
+        }
+    };
+
+    const handleRenameDeck = (e: React.MouseEvent, deck: FlashcardDeck) => {
+        e.stopPropagation();
+        const newName = prompt("Nhập tên mới cho bộ thẻ:", deck.title);
+        if (newName && newName.trim()) {
+            renameFlashcardDeck(deck.id, newName);
+        }
     };
 
     const renderQuestCard = useCallback((asg: any, isDone: boolean) => {
@@ -459,8 +475,25 @@ const AssignmentHubPage: React.FC = () => {
                                     <div 
                                         key={deck.id} 
                                         onClick={() => setSelectedDeck(deck)}
-                                        className="card p-6 cursor-pointer hover:-translate-y-2 hover:shadow-2xl transition-all border-purple-500/30 group bg-gray-900/50"
+                                        className="card p-6 cursor-pointer hover:-translate-y-2 hover:shadow-2xl transition-all border-purple-500/30 group bg-gray-900/50 relative"
                                     >
+                                        <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                                onClick={(e) => handleRenameDeck(e, deck)}
+                                                className="p-1.5 bg-gray-700 hover:bg-blue-600 rounded-full text-white shadow"
+                                                title="Đổi tên"
+                                            >
+                                                ✎
+                                            </button>
+                                            <button 
+                                                onClick={(e) => handleDeleteDeck(e, deck.id)}
+                                                className="p-1.5 bg-gray-700 hover:bg-red-600 rounded-full text-white shadow"
+                                                title="Xóa bộ thẻ"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
+
                                         <div className="flex justify-between items-start mb-4">
                                             <div className="text-4xl group-hover:scale-110 transition-transform">🗂️</div>
                                             <span className="text-xs bg-purple-900 text-purple-200 px-2 py-1 rounded font-bold">

@@ -262,6 +262,8 @@ const NotebookPage: React.FC = () => {
             return;
         }
         
+        if (!user) return;
+
         // Convert draft to real Flashcards
         const realCards: Flashcard[] = draftCards.map((c, i) => ({
             id: `fc_draft_${Date.now()}_${i}`,
@@ -271,7 +273,7 @@ const NotebookPage: React.FC = () => {
             nextReview: 0
         }));
 
-        createFlashcardDeck(draftDeckTitle, realCards);
+        createFlashcardDeck(user.id, draftDeckTitle, realCards);
         
         alert(`✅ Đã tạo bộ thẻ "${draftDeckTitle}" với ${realCards.length} thẻ thành công!`);
         // Reset Draft
@@ -637,7 +639,8 @@ const NotebookPage: React.FC = () => {
                                     back: c.back,
                                     box: 0, nextReview: 0
                                 }));
-                                createFlashcardDeck(draftDeckTitle, realCards);
+                                // CHANGED: Pass user.id
+                                createFlashcardDeck(user.id, draftDeckTitle, realCards);
                                 alert(`✅ Đã tạo bộ thẻ "${draftDeckTitle}" thành công!`);
                                 setDraftCards([]);
                                 setDraftDeckTitle('');
@@ -716,7 +719,8 @@ const NotebookPage: React.FC = () => {
                                     back: c.back,
                                     box: 0, nextReview: 0
                                 }));
-                                createFlashcardDeck(draftDeckTitle, realCards);
+                                // CHANGED: Pass user.id
+                                createFlashcardDeck(user.id, draftDeckTitle, realCards);
                                 alert(`✅ Đã lưu bộ thẻ thành công!`);
                                 setDraftCards([]);
                                 setDraftDeckTitle('');

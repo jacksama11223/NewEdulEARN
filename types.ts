@@ -50,7 +50,6 @@ export interface Assignment {
   type: 'file' | 'quiz';
   quizId?: string;
   createdAt?: string;
-  // New fields for Commander's Challenge
   description?: string;
   rank?: 'S' | 'A' | 'B';
   isBoss?: boolean;
@@ -290,6 +289,7 @@ export interface Flashcard {
 
 export interface FlashcardDeck {
   id: string;
+  userId?: string; // NEW
   courseId?: string;
   moduleId?: string;
   title: string;

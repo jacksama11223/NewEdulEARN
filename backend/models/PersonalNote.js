@@ -1,6 +1,8 @@
+
 import mongoose from 'mongoose';
 
 const personalNoteSchema = new mongoose.Schema({
+    id: { type: String, required: true, unique: true }, // Explicit ID for frontend sync
     userId: { type: String, required: true, index: true },
     title: { type: String, required: true },
     content: { type: String, default: '' },

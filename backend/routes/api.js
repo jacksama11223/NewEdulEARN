@@ -18,6 +18,8 @@ import FlashcardDeck from '../models/FlashcardDeck.js'; // NEW IMPORT
 
 const router = express.Router();
 
+// ... (Keep existing routes until SRS section) ...
+
 // --- AUTH ---
 router.post('/auth/login', loginUser);
 router.post('/auth/register', registerUser);
@@ -86,6 +88,12 @@ router.post('/courses', async (req, res) => {
     try {
         const { id, ...updateData } = req.body;
         const course = await Course.findOneAndUpdate({ id }, { id, ...updateData }, { new: true, upsert: true });
+        
+        // Notify all users about the new/updated course
+        if (req.io) {
+            req.io.emit('db_update', { type: 'COURSE', data: course });
+        }
+        
         res.status(201).json(course);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -107,6 +115,9 @@ router.get('/lessons/:courseId', async (req, res) => {
 router.post('/lessons', async (req, res) => {
     try {
         const lesson = await Lesson.create(req.body);
+        if (req.io) {
+            req.io.emit('db_update', { type: 'LESSON', data: lesson });
+        }
         res.status(201).json(lesson);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -122,6 +133,9 @@ router.get('/assignments', async (req, res) => {
 router.post('/assignments', async (req, res) => {
     try {
         const assignment = await Assignment.create(req.body);
+        if (req.io) {
+            req.io.emit('db_update', { type: 'ASSIGNMENT', data: assignment });
+        }
         res.status(201).json(assignment);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -137,6 +151,9 @@ router.post('/quizzes', async (req, res) => {
     try {
         const { id, ...updateData } = req.body;
         const quiz = await Quiz.findOneAndUpdate({ id }, { id, ...updateData }, { new: true, upsert: true });
+        if (req.io) {
+            req.io.emit('db_update', { type: 'QUIZ', data: quiz });
+        }
         res.status(201).json(quiz);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -153,6 +170,10 @@ router.post('/quiz-submissions', async (req, res) => {
         const { quizId, studentId } = req.body;
         await QuizSubmission.deleteOne({ quizId, studentId });
         const sub = await QuizSubmission.create(req.body);
+        // Only notify the teacher and the student (optimized), but for now broadcast to keep simple
+        if (req.io) {
+            req.io.emit('db_update', { type: 'QUIZ_SUBMISSION', data: sub });
+        }
         res.status(201).json(sub);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -245,6 +266,9 @@ router.get('/groups', async (req, res) => {
 router.post('/groups', async (req, res) => {
     try {
         const group = await StudyGroup.create(req.body);
+        if (req.io) {
+            req.io.emit('db_update', { type: 'GROUP', data: group });
+        }
         res.status(201).json(group);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -283,6 +307,7 @@ router.delete('/group-chat/:msgId', async (req, res) => {
         const message = await GroupMessage.findOneAndDelete({ id: req.params.msgId });
         if (!message) return res.status(404).json({ message: "Message not found" });
         if (req.io) {
+            // FIX: Broadcast to group room that a message was deleted
             req.io.to(message.groupId).emit('group_message_deleted', { msgId: message.id, groupId: message.groupId });
         }
         res.json({ message: "Group message deleted successfully" });
@@ -327,6 +352,44 @@ router.post('/paths', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
+// FIX: New Endpoint to Assign Paths to Multiple Students
+router.post('/paths/assign', async (req, res) => {
+    try {
+        const { teacherName, studentIds, pathData } = req.body;
+        const createdPaths = [];
+
+        for (const studentId of studentIds) {
+            const newPathData = {
+                ...pathData,
+                id: `lp_assign_${Date.now()}_${studentId}`, // Unique ID per student
+                creatorId: studentId, // Student becomes the owner to track their progress
+                createdAt: new Date()
+            };
+            
+            const newPath = await LearningPath.create(newPathData);
+            createdPaths.push(newPath);
+
+            // Notify Student
+            if (req.io) {
+                // 1. Send Notification
+                req.io.to(studentId).emit('receive_notification', {
+                    id: `notif_assign_${Date.now()}`,
+                    text: `👨‍🏫 Giáo viên ${teacherName} đã giao cho bạn lộ trình: "${newPathData.title}"`,
+                    type: 'assignment',
+                    timestamp: new Date()
+                });
+                
+                // 2. Push Update directly so it appears in list without refresh
+                req.io.to(studentId).emit('learning_path_assigned', newPath);
+            }
+        }
+
+        res.status(201).json({ message: `Assigned to ${createdPaths.length} students`, paths: createdPaths });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 router.put('/paths/:id', async (req, res) => {
     try {
         const path = await LearningPath.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
@@ -334,10 +397,10 @@ router.put('/paths/:id', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
-// --- FLASHCARD DECKS (NEW CRUD) ---
+// ... (Rest of file remains unchanged)
+// --- FLASHCARD DECKS ---
 router.get('/decks/:userId', async (req, res) => {
     try {
-        // Fetch decks created by user + standard course decks
         const decks = await FlashcardDeck.find({ userId: req.params.userId });
         res.json(decks);
     } catch (error) { res.status(500).json({ message: error.message }); }
@@ -364,9 +427,9 @@ router.delete('/decks/:id', async (req, res) => {
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
 
-// --- SRS REVIEW SYSTEM (ANKI-STYLE / DUOLINGO-STYLE) ---
+// --- SRS REVIEW SYSTEM ---
 
-// Get all cards due for review from BOTH Decks and Learning Paths
+// Get OVERDUE cards (for Smart Widget)
 router.get('/reviews/due/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
@@ -377,8 +440,6 @@ router.get('/reviews/due/:userId', async (req, res) => {
         const decks = await FlashcardDeck.find({ userId });
         decks.forEach(deck => {
             deck.cards.forEach(card => {
-                // Determine if card is due (nextReview <= now)
-                // New cards have nextReview = 0, so they are always due.
                 if (card.nextReview <= now) {
                     dueCards.push({
                         ...card.toObject(),
@@ -390,7 +451,7 @@ router.get('/reviews/due/:userId', async (req, res) => {
             });
         });
 
-        // 2. Fetch from Learning Paths (Deep Search)
+        // 2. Fetch from Learning Paths
         const paths = await LearningPath.find({ creatorId: userId });
         paths.forEach(path => {
             path.nodes.forEach(node => {
@@ -400,7 +461,7 @@ router.get('/reviews/due/:userId', async (req, res) => {
                             dueCards.push({
                                 ...card.toObject(),
                                 sourceType: 'path',
-                                sourceId: path.id, // pathId
+                                sourceId: path.id, 
                                 nodeId: node.id,
                                 deckTitle: `${path.title} - ${node.title}`
                             });
@@ -410,7 +471,6 @@ router.get('/reviews/due/:userId', async (req, res) => {
             });
         });
         
-        // Sort: Overdue items first
         dueCards.sort((a, b) => a.nextReview - b.nextReview);
 
         res.json(dueCards);
@@ -419,7 +479,65 @@ router.get('/reviews/due/:userId', async (req, res) => {
     }
 });
 
-// Record review result (Exponential Backoff Algorithm)
+// NEW: Get UPCOMING reviews (Paged)
+router.get('/reviews/upcoming/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        let allCards = [];
+
+        // 1. From Decks
+        const decks = await FlashcardDeck.find({ userId });
+        decks.forEach(deck => {
+            deck.cards.forEach(card => {
+                allCards.push({
+                    ...card.toObject(),
+                    deckTitle: deck.title,
+                    sourceId: deck.id,
+                    type: 'Deck'
+                });
+            });
+        });
+
+        // 2. From Paths
+        const paths = await LearningPath.find({ creatorId: userId });
+        paths.forEach(path => {
+            path.nodes.forEach(node => {
+                if (node.flashcards) {
+                    node.flashcards.forEach(card => {
+                        allCards.push({
+                            ...card.toObject(),
+                            deckTitle: `${path.title} - ${node.title}`,
+                            sourceId: path.id,
+                            type: 'Path'
+                        });
+                    });
+                }
+            });
+        });
+
+        // Sort by nextReview (Nearest first)
+        allCards.sort((a, b) => a.nextReview - b.nextReview);
+
+        const total = allCards.length;
+        const paginatedCards = allCards.slice(skip, skip + limit);
+
+        res.json({
+            cards: paginatedCards,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit)
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Record review result (OPTIMIZED SRS ALGORITHM)
 router.post('/reviews/record', async (req, res) => {
     try {
         const { cardId, rating, sourceType, sourceId, nodeId } = req.body;
@@ -449,54 +567,46 @@ router.post('/reviews/record', async (req, res) => {
         if (cardIndex === -1) return res.status(404).json({ message: "Card not found" });
 
         const card = cardList[cardIndex];
-        let newBox = card.box || 0; // Box essentially represents 'streak' or 'ease tier'
+        let newBox = card.box || 0; 
         let interval = 0;
 
-        // --- EXPONENTIAL BACKOFF LOGIC (ANKI STYLE) ---
+        // --- OPTIMIZED ANKI-STYLE ALGORITHM ---
+        // Goal: Repeat short intervals (min/hour) first, then jump to days.
+        
         if (rating === 'hard') {
-            // FORGOT: Reset to beginning.
             newBox = 0; 
-            interval = 10 * ONE_MINUTE; // Review again in 10 mins (Learning step)
+            interval = 1 * ONE_MINUTE; // Reset: 1 min
         } else if (rating === 'medium') {
-            // STRUGGLED: Keep current level, small boost.
-            // If new, 1 day. If mature, 1.5x current interval (estimated).
-            // Simplified: box stays same, interval is conservative.
-            newBox = Math.max(0, newBox);
-            // Estimate previous interval based on box
-            // If box 0 -> 1 day. Box 1 -> 2 days.
-            const prevIntervalEstimate = (newBox === 0 ? 1 : Math.pow(2.2, newBox)) * ONE_DAY;
-            interval = Math.max(ONE_DAY, prevIntervalEstimate * 1.2); 
-        } else { // 'easy'
-            // MASTERED: Graduated increment.
-            // Box 0 -> 1 day
-            // Box 1 -> 3 days
-            // Box 2 -> 7 days
-            // Box 3 -> 16 days
-            // Box 4 -> 35 days
-            // Box 5 -> 80 days (~3 months)
-            // Box 6 -> 180 days (~6 months)
-            // Box 7 -> 365 days (1 year)
-            
+            // Struggle but correct: Keep box or slightly reduce, short interval
+            newBox = Math.max(0, newBox - 1);
+            interval = 10 * ONE_MINUTE; // 10 mins
+        } else { 
+            // Easy
             newBox = newBox + 1;
             
-            if (newBox === 1) interval = 1 * ONE_DAY;
-            else if (newBox === 2) interval = 3 * ONE_DAY;
-            else if (newBox === 3) interval = 7 * ONE_DAY;
-            else if (newBox === 4) interval = 16 * ONE_DAY;
-            else if (newBox === 5) interval = 35 * ONE_DAY;
-            else if (newBox === 6) interval = 80 * ONE_DAY;
-            else if (newBox === 7) interval = 180 * ONE_DAY;
-            else interval = 365 * ONE_DAY * (Math.pow(1.1, newBox - 7)); // Year+ with slow growth
+            // Learning Steps (Short term)
+            if (newBox === 1) interval = 10 * ONE_MINUTE;      // Step 1: 10 mins
+            else if (newBox === 2) interval = 1 * ONE_HOUR;    // Step 2: 1 hour
+            else if (newBox === 3) interval = 5 * ONE_HOUR;    // Step 3: 5 hours
+            
+            // Graduated Steps (Long term)
+            else if (newBox === 4) interval = 1 * ONE_DAY;     // Graduated: 1 day
+            else if (newBox === 5) interval = 3 * ONE_DAY;     // 3 days
+            else if (newBox === 6) interval = 7 * ONE_DAY;     // 1 week
+            else {
+                // Exponential Growth for long term
+                // E.g. Box 7 -> ~14 days, Box 8 -> ~30 days
+                const days = 7 * Math.pow(2, newBox - 6);
+                interval = days * ONE_DAY;
+            }
         }
 
         const nextReview = now + interval;
 
-        // Update In-Memory
         card.box = newBox;
         card.nextReview = nextReview;
         card.lastReviewed = now;
 
-        // Mongoose specifics
         if (sourceType === 'path') {
             doc.markModified('nodes');
         } else {

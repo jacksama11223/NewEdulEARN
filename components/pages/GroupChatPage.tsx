@@ -86,6 +86,16 @@ const GroupChatPage: React.FC = () => {
         return { chatHistory: history, userInGroup: inGroup, sharedNotes: notes };
     }, [selectedGroup, user, db.GROUP_CHAT_MESSAGES, db.PERSONAL_NOTES, isTeacher, isAdmin]);
 
+    // FIX: Sync selectedGroup with DB updates (Realtime Member Count)
+    useEffect(() => {
+        if (selectedGroup) {
+            const updatedGroup = db.STUDY_GROUPS.find(g => g.id === selectedGroup.id);
+            if (updatedGroup && updatedGroup !== selectedGroup) {
+                setSelectedGroup(updatedGroup);
+            }
+        }
+    }, [db.STUDY_GROUPS, selectedGroup]);
+
     // Calculate simulated energy
     const squadronEnergy = useMemo(() => {
         if (!selectedGroup) return 0;

@@ -281,6 +281,12 @@ router.put('/groups/:id/join', async (req, res) => {
             { $addToSet: { members: userId } },
             { new: true }
         );
+        
+        // FIX: Notify all users about group update (member list change)
+        if (req.io) {
+            req.io.emit('db_update', { type: 'GROUP', data: group });
+        }
+
         res.json(group);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -307,7 +313,6 @@ router.delete('/group-chat/:msgId', async (req, res) => {
         const message = await GroupMessage.findOneAndDelete({ id: req.params.msgId });
         if (!message) return res.status(404).json({ message: "Message not found" });
         if (req.io) {
-            // FIX: Broadcast to group room that a message was deleted
             req.io.to(message.groupId).emit('group_message_deleted', { msgId: message.id, groupId: message.groupId });
         }
         res.json({ message: "Group message deleted successfully" });
@@ -397,7 +402,6 @@ router.put('/paths/:id', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
-// ... (Rest of file remains unchanged)
 // --- FLASHCARD DECKS ---
 router.get('/decks/:userId', async (req, res) => {
     try {
@@ -571,7 +575,6 @@ router.post('/reviews/record', async (req, res) => {
         let interval = 0;
 
         // --- OPTIMIZED ANKI-STYLE ALGORITHM ---
-        // Goal: Repeat short intervals (min/hour) first, then jump to days.
         
         if (rating === 'hard') {
             newBox = 0; 
@@ -595,7 +598,6 @@ router.post('/reviews/record', async (req, res) => {
             else if (newBox === 6) interval = 7 * ONE_DAY;     // 1 week
             else {
                 // Exponential Growth for long term
-                // E.g. Box 7 -> ~14 days, Box 8 -> ~30 days
                 const days = 7 * Math.pow(2, newBox - 6);
                 interval = days * ONE_DAY;
             }

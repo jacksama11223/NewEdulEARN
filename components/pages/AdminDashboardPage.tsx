@@ -169,7 +169,7 @@ const AdminDashboardPage: React.FC = () => {
                     <h2 className="text-2xl font-semibold text-gray-200">Bảng điều khiển</h2>
                     <button onClick={() => { unlockAllUsers(); alert("Đã mở khóa tất cả tài khoản."); }} className="btn btn-secondary text-xs">🔓 Mở khóa Tất cả Users</button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     <button onClick={() => navigate('admin_resilience')} className="btn btn-secondary text-base p-6 justify-start text-left h-full">
                         <div>
                             <p className="font-semibold text-lg">🔧 Quản lý Độ ổn định (Resilience)</p>
@@ -180,6 +180,12 @@ const AdminDashboardPage: React.FC = () => {
                         <div>
                             <p className="font-semibold text-lg">🚀 Quản lý Phát hành (Canary)</p>
                             <p className="text-sm font-normal text-gray-400 mt-1">Quản lý Feature Flags (v2, v3, v4...) cho từng nhóm người dùng.</p>
+                        </div>
+                    </button>
+                    <button onClick={() => navigate('group_chat')} className="btn btn-secondary text-base p-6 justify-start text-left h-full border border-purple-500/30 hover:border-purple-500 hover:bg-purple-900/20">
+                        <div>
+                            <p className="font-semibold text-lg">🛸 Giám sát Phi đội (Chat Ops)</p>
+                            <p className="text-sm font-normal text-gray-400 mt-1">Xem tất cả các nhóm, xóa tin nhắn vi phạm.</p>
                         </div>
                     </button>
                     <button onClick={() => navigate('security')} className="btn btn-secondary text-base p-6 justify-start text-left h-full">

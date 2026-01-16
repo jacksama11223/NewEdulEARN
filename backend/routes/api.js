@@ -290,6 +290,23 @@ router.post('/group-chat/send', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
+router.delete('/group-chat/:msgId', async (req, res) => {
+    try {
+        const message = await GroupMessage.findOneAndDelete({ id: req.params.msgId });
+        
+        if (!message) {
+            return res.status(404).json({ message: "Message not found" });
+        }
+
+        // Broadcast delete event via Socket.IO to Group Room
+        if (req.io) {
+            req.io.to(message.groupId).emit('group_message_deleted', { msgId: message.id, groupId: message.groupId });
+        }
+
+        res.json({ message: "Group message deleted successfully" });
+    } catch (error) { res.status(500).json({ message: error.message }); }
+});
+
 router.put('/group-chat/:msgId/resolve', async (req, res) => {
     try {
         const { rescuerName } = req.body;
@@ -321,10 +338,6 @@ router.post('/paths', async (req, res) => {
         const path = await LearningPath.create(req.body);
         
         // REAL-TIME NOTIFICATION LOGIC
-        // If creatorId (user) is assigned this path by a teacher (implied if creator != teacher? No, simple logic: check if context says 'assign')
-        // In this app, assignLearningPath from frontend creates path with creatorId = studentId.
-        // We can just emit to creatorId. If creatorId is logged in, they get a notif.
-        
         if (req.io) {
             req.io.to(req.body.creatorId).emit('receive_notification', {
                 id: `notif_${Date.now()}`,

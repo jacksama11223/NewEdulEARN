@@ -26,7 +26,8 @@ const getSquadronStats = (groupId: string) => {
 
 const GroupChatPage: React.FC = () => {
     const { user } = useContext(AuthContext)!;
-    const { db, joinGroup, sendGroupMessage, createGroup, sendChatMessage, addNoteComment, resolveSOS, unlockSharedNote, generateArchive } = useContext(DataContext)!;
+    // Added deleteGroupMessage to destructuring
+    const { db, joinGroup, sendGroupMessage, deleteGroupMessage, createGroup, sendChatMessage, addNoteComment, resolveSOS, unlockSharedNote, generateArchive } = useContext(DataContext)!;
     const { serviceStatus, setPage: setGlobalPage } = useContext(GlobalStateContext)!;
     
     const [selectedGroup, setSelectedGroup] = useState<StudyGroup | null>(null);
@@ -66,22 +67,24 @@ const GroupChatPage: React.FC = () => {
     
     const isGroupServiceOk = serviceStatus.group_service === 'OPERATIONAL';
     const isTeacher = user?.role === 'TEACHER';
+    const isAdmin = user?.role === 'ADMIN'; // Check Admin Role
 
     const groups = useMemo(() => {
-        if (isTeacher) return db.STUDY_GROUPS; // Teacher sees all
+        if (isTeacher || isAdmin) return db.STUDY_GROUPS; // Teacher and Admin sees all
         // For Students: Could filter joined groups separately if needed, but the current UI shows all available to join
         return db.STUDY_GROUPS;
-    }, [db.STUDY_GROUPS, isTeacher]);
+    }, [db.STUDY_GROUPS, isTeacher, isAdmin]);
 
     const contacts = useMemo(() => (Object.values(db.USERS) as User[]).filter(u => u.id !== user?.id), [db.USERS, user?.id]);
 
     const { chatHistory, userInGroup, sharedNotes } = useMemo(() => {
         if (!selectedGroup || !user) return { chatHistory: [], userInGroup: false, sharedNotes: [] };
         const history = db.GROUP_CHAT_MESSAGES[selectedGroup.id] || [];
-        const inGroup = isTeacher || selectedGroup.members.includes(user.id); // Teacher effectively "in" all groups for viewing
+        // Teacher and Admin effectively "in" all groups for viewing
+        const inGroup = isTeacher || isAdmin || selectedGroup.members.includes(user.id); 
         const notes = (Object.values(db.PERSONAL_NOTES || {}) as PersonalNote[]).filter(n => n.sharedWithSquadronId === selectedGroup.id);
         return { chatHistory: history, userInGroup: inGroup, sharedNotes: notes };
-    }, [selectedGroup, user, db.GROUP_CHAT_MESSAGES, db.PERSONAL_NOTES, isTeacher]);
+    }, [selectedGroup, user, db.GROUP_CHAT_MESSAGES, db.PERSONAL_NOTES, isTeacher, isAdmin]);
 
     // Calculate simulated energy
     const squadronEnergy = useMemo(() => {
@@ -191,6 +194,14 @@ const GroupChatPage: React.FC = () => {
         }
     };
 
+    // --- ADMIN DELETE LOGIC ---
+    const handleDeleteMessage = (msgId: string) => {
+        if (!selectedGroup || !isAdmin) return;
+        if (confirm("Bạn chắc chắn muốn xóa tin nhắn này? Hành động này sẽ cập nhật cho tất cả thành viên.")) {
+            deleteGroupMessage(selectedGroup.id, msgId);
+        }
+    };
+
     // --- DATA HEIST LOGIC ---
     const handleUnlockIntel = (e: React.MouseEvent, note: PersonalNote) => {
         e.stopPropagation();
@@ -260,15 +271,15 @@ const GroupChatPage: React.FC = () => {
                 <div className="p-5 bg-black/30 backdrop-blur-xl border border-white/10 rounded-3xl shadow-lg relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl"></div>
                     <h2 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-2 relative z-10">
-                        <span className="text-2xl">{isTeacher ? '👁️' : '🚀'}</span> {isTeacher ? 'Trạm Quan Sát' : 'Hangar Bay'}
+                        <span className="text-2xl">{isTeacher || isAdmin ? '👁️' : '🚀'}</span> {isTeacher || isAdmin ? 'Trạm Quan Sát' : 'Hangar Bay'}
                     </h2>
                     <p className="text-xs text-blue-300/70 mt-1 font-mono">
-                        {isTeacher ? 'Giám sát hoạt động các Phi đội' : 'Chọn phi thuyền để tham chiến'}
+                        {isTeacher || isAdmin ? 'Giám sát hoạt động các Phi đội' : 'Chọn phi thuyền để tham chiến'}
                     </p>
                 </div>
 
                 {/* CREATE BUTTON (Student Only) */}
-                {!isTeacher && (
+                {!isTeacher && !isAdmin && (
                     <button 
                         onClick={() => setIsCreateModalOpen(true)}
                         className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold shadow-lg border border-white/10 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] group"
@@ -283,7 +294,7 @@ const GroupChatPage: React.FC = () => {
                         const isSelected = selectedGroup?.id === g.id;
                         
                         // Teacher: Check for "High Chat / Low Progress" anomaly
-                        const isAttentionNeeded = isTeacher && stats.activityScore > 70 && stats.progressScore < 30;
+                        const isAttentionNeeded = (isTeacher || isAdmin) && stats.activityScore > 70 && stats.progressScore < 30;
 
                         return (
                             <button 
@@ -310,7 +321,7 @@ const GroupChatPage: React.FC = () => {
                                     </span>
                                 </div>
                                 
-                                {isTeacher ? (
+                                {(isTeacher || isAdmin) ? (
                                     <div className="flex gap-2 mt-2 text-[10px] font-mono">
                                         <span className={`${stats.activityScore > 70 ? 'text-red-400' : 'text-green-400'}`}>Chat: {stats.activityScore}%</span>
                                         <span className="text-gray-600">|</span>
@@ -338,7 +349,7 @@ const GroupChatPage: React.FC = () => {
                             <div className="w-32 h-32 border border-blue-500/40 rounded-full border-dashed animate-reverse-spin"></div>
                         </div>
                         <p className="mt-6 font-mono text-blue-300/60 tracking-widest text-sm">
-                            {isTeacher ? 'MONITORING SYSTEM ONLINE...' : 'SYSTEM STANDBY...'}
+                            {isTeacher || isAdmin ? 'MONITORING SYSTEM ONLINE...' : 'SYSTEM STANDBY...'}
                         </p>
                     </div>
                 ) : (
@@ -374,7 +385,7 @@ const GroupChatPage: React.FC = () => {
                                                 INTEL ({sharedNotes.length})
                                             </button>
                                         </div>
-                                        {!isTeacher && (
+                                        {!isTeacher && !isAdmin && (
                                             <button onClick={() => setIsShareModalOpen(true)} className="btn btn-sm bg-blue-500/20 text-blue-300 border border-blue-500/50 hover:bg-blue-500 hover:text-white flex items-center gap-2">
                                                 <span>🔗</span> <span className="hidden sm:inline">Invite</span>
                                             </button>
@@ -405,8 +416,9 @@ const GroupChatPage: React.FC = () => {
                                         }
 
                                         return (
-                                            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group`}>
-                                                {!isMe && <div className="mr-3 flex flex-col items-center"><div className="w-8 h-8 rounded-lg bg-gray-800 border border-gray-600 flex items-center justify-center text-xs font-bold text-gray-400">{msg.user.name.charAt(0)}</div></div>}
+                                            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group items-start gap-2`}>
+                                                {!isMe && <div className="flex flex-col items-center"><div className="w-8 h-8 rounded-lg bg-gray-800 border border-gray-600 flex items-center justify-center text-xs font-bold text-gray-400">{msg.user.name.charAt(0)}</div></div>}
+                                                
                                                 <div className={`max-w-[75%] relative ${isMsgSOS && isPending ? 'animate-shake' : ''} ${isWhisperMsg ? 'animate-pulse' : ''}`}>
                                                     <div className={`py-3 px-4 rounded-xl border backdrop-blur-md text-sm shadow-lg 
                                                         ${isMsgSOS 
@@ -418,7 +430,6 @@ const GroupChatPage: React.FC = () => {
                                                                     : 'bg-gray-800/80 border-gray-600/50 text-gray-200 rounded-tl-none'
                                                         }`}
                                                     >
-                                                        
                                                         {isMsgSOS && (
                                                             <div className="flex justify-between items-center mb-2 pb-2 border-b border-white/20">
                                                                 <div className="text-[10px] font-black text-white flex items-center gap-1">
@@ -448,6 +459,17 @@ const GroupChatPage: React.FC = () => {
                                                     </div>
                                                     <p className={`text-[9px] mt-1 opacity-50 font-mono ${isMe ? 'text-right text-blue-200' : 'text-left text-gray-400'}`}>{msg.user.role !== 'STUDENT' ? `★ ${msg.user.role} • ` : ''}{new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</p>
                                                 </div>
+
+                                                {/* ADMIN DELETE BUTTON */}
+                                                {isAdmin && (
+                                                    <button 
+                                                        onClick={() => handleDeleteMessage(msg.id)}
+                                                        className="self-center p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-900/20 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                                                        title="Admin: Xóa tin nhắn"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -455,11 +477,11 @@ const GroupChatPage: React.FC = () => {
                                 <div className="p-4 bg-black/40 border-t border-white/10 relative z-20">
                                     <form onSubmit={handleSend} className="flex gap-3 items-end">
                                         
-                                        {!isTeacher && (
+                                        {!isTeacher && !isAdmin && (
                                             <button type="button" onClick={() => setIsSOS(!isSOS)} className={`h-12 px-4 rounded-xl border-2 font-bold transition-all flex items-center gap-2 ${isSOS ? 'bg-red-600 border-red-400 text-white shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse' : 'bg-gray-800 border-gray-600 text-gray-400 hover:text-red-400 hover:border-red-500'}`} title="Bật Tín hiệu Cấp cứu">🚨</button>
                                         )}
                                         
-                                        {isTeacher && (
+                                        {(isTeacher || isAdmin) && (
                                             <button 
                                                 type="button" 
                                                 onClick={() => setIsWhisper(!isWhisper)} 
@@ -508,8 +530,8 @@ const GroupChatPage: React.FC = () => {
                                     </div>
                                 ) : sharedNotes.map(note => {
                                     const isOwner = note.userId === user?.id;
-                                    // Teacher can always see content
-                                    const isUnlocked = isOwner || isTeacher || note.unlockedBy?.includes(user!.id);
+                                    // Teacher and Admin can always see content
+                                    const isUnlocked = isOwner || isTeacher || isAdmin || note.unlockedBy?.includes(user!.id);
 
                                     return (
                                         <div 

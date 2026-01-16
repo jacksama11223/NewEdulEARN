@@ -22,6 +22,26 @@ const BACKEND_URL = `${BASE_URL}/api`;
 
 console.log("🔗 AppProviders connecting to:", BACKEND_URL);
 
+// --- SOUND ASSETS ---
+const SOUNDS = {
+    // Thông báo chung / Tin nhắn đến
+    notification: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
+    // Gửi tin nhắn đi (nhẹ nhàng)
+    sent: 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3', 
+    // Thành công (Nộp bài, Tạo thẻ, Lưu note)
+    success: 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3', 
+    // Mua đồ / Nhận tiền (Coin sound)
+    cash: 'https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3',
+    // Lên cấp / Hoàn thành bài học (Fanfare)
+    level_up: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3',
+    // Lỗi / Xóa (Thud)
+    error: 'https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3',
+    // Click nhẹ (UI interaction - optional)
+    click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3' 
+};
+
+type SoundType = keyof typeof SOUNDS;
+
 // --- CONTEXT DEFINITIONS ---
 
 export interface AuthContextType {
@@ -34,9 +54,12 @@ export interface AuthContextType {
 
 export interface DataContextType {
     db: Database;
-    unreadCounts: { chat: number; group: number; alert: number }; // NEW
-    resetUnreadCount: (type: 'chat' | 'group' | 'alert') => void; // NEW
+    unreadCounts: { chat: number; group: number; alert: number }; 
+    resetUnreadCount: (type: 'chat' | 'group' | 'alert') => void;
     
+    // NEW: Sound Player
+    playSound: (type: SoundType) => void;
+
     // NEW: Method to sync user data immediately after login to prevent white screen
     syncUserToDb: (user: User) => void; 
 
@@ -74,6 +97,7 @@ export interface DataContextType {
     // Chat & Social
     sendChatMessage: (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => void;
     sendGroupMessage: (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => void;
+    deleteGroupMessage: (groupId: string, msgId: string) => void; 
     joinGroup: (groupId: string, userId: string, inviteMsgId?: string) => void;
     createGroup: (name: string, creatorId: string) => void;
     createRaidParty: (name: string, creatorId: string, memberIds: string[], bossName: string) => void;
@@ -191,10 +215,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUnreadCounts(prev => ({ ...prev, [type]: 0 }));
     };
 
-    const playNotificationSound = () => {
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-        audio.volume = 0.5;
+    // --- ENHANCED SOUND SYSTEM ---
+    const playSound = (type: SoundType) => {
+        const url = SOUNDS[type];
+        if (!url) return;
+        const audio = new Audio(url);
+        // Reduce volume for repetitive sounds
+        audio.volume = type === 'sent' || type === 'click' ? 0.3 : 0.5; 
         audio.play().catch(e => console.log("Audio play blocked (user interaction needed)", e));
+    };
+
+    const playNotificationSound = () => {
+        playSound('notification');
     };
 
     // --- GLOBAL DATA FETCHING ---
@@ -337,9 +369,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 });
             });
 
+            // NEW: Listen for Deleted Group Messages
+            newSocket.on('group_message_deleted', ({ msgId, groupId }) => {
+                setDb(prev => {
+                    const groupMsgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
+                    return {
+                        ...prev,
+                        GROUP_CHAT_MESSAGES: {
+                            ...prev.GROUP_CHAT_MESSAGES,
+                            [groupId]: groupMsgs.filter(m => m.id !== msgId)
+                        }
+                    };
+                });
+            });
+
             // Listen for General Notifications (Assignments, Announcements)
             newSocket.on('receive_notification', (notif: Notification) => {
-                playNotificationSound();
+                playSound('notification');
                 setUnreadCounts(prev => ({ ...prev, alert: prev.alert + 1 }));
                 setDb(prev => {
                     const currentNotifs = prev.NOTIFICATIONS[user.id] || [];
@@ -436,10 +482,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, [socket]);
 
     const setApiKey = (userId: string, key: string) => {
+        playSound('success');
         setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], apiKey: key } } }));
     };
 
     const markLessonComplete = (userId: string, lessonId: string) => {
+        playSound('level_up');
         setDb(prev => {
             const current = prev.LESSON_PROGRESS[userId] || [];
             if (!current.includes(lessonId)) {
@@ -450,6 +498,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const submitFileAssignment = (assignmentId: string, studentId: string, fileName: string) => {
+        playSound('success');
         setDb(prev => {
             const subs = prev.FILE_SUBMISSIONS[assignmentId] || [];
             const idx = subs.findIndex(s => s.studentId === studentId);
@@ -475,6 +524,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const total = quiz?.questions.length || 0;
         const percentage = total > 0 ? (score/total)*100 : 0;
         
+        // Sound logic for quiz
+        if (percentage >= 80) playSound('level_up');
+        else playSound('success');
+
         const submissionPayload = { quizId, studentId: userId, score, total, percentage, answers, timestamp: new Date().toISOString() };
 
         setDb(prev => ({ ...prev, QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: { ...prev.QUIZ_SUBMISSIONS[quizId], [userId]: submissionPayload } } }));
@@ -499,6 +552,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
     const addVideoNote = (lessonId: string, userId: string, timestamp: number, text: string) => {
+        playSound('success');
         setDb(prev => {
             const notes = prev.VIDEO_NOTES[lessonId] || [];
             const newNote = { id: `vn_${Date.now()}`, userId, lessonId, timestamp, text, createdAt: new Date().toISOString() };
@@ -545,7 +599,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (error: any) { console.error("Register Error:", error); throw error; }
     };
 
-    const completeOnboarding = (userId: string) => { setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], hasSeenOnboarding: true } } })); };
+    const completeOnboarding = (userId: string) => { 
+        playSound('success');
+        setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], hasSeenOnboarding: true } } })); 
+    };
     const dismissAnnouncement = (id: string) => { setDb(prev => ({ ...prev, ANNOUNCEMENTS: prev.ANNOUNCEMENTS.filter(a => a.id !== id) })); };
     const markNotificationRead = (userId: string, notifId: string) => {
         setDb(prev => ({ ...prev, NOTIFICATIONS: { ...prev.NOTIFICATIONS, [userId]: (prev.NOTIFICATIONS[userId] || []).map(n => n.id === notifId ? { ...n, read: true } : n) } }));
@@ -554,7 +611,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const item = db.SHOP_ITEMS.find(i => i.id === itemId);
         if (!item) throw new Error("Item not found");
         const currency = item.currency === 'diamond' ? 'diamonds' : 'points';
-        if (db.GAMIFICATION[currency] < item.cost) throw new Error("Not enough funds");
+        if (db.GAMIFICATION[currency] < item.cost) {
+            playSound('error');
+            throw new Error("Not enough funds");
+        }
+        playSound('cash');
         setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, [currency]: prev.GAMIFICATION[currency] - item.cost, inventory: [...prev.GAMIFICATION.inventory, itemId] } }));
     };
     const equipShopItem = (itemId: string) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, equippedSkin: itemId } })); };
@@ -568,6 +629,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return false;
     };
     const unlockSecretReward = (userId: string, type: 'skin'|'diamond', value: string|number) => {
+        playSound('level_up');
         setDb(prev => {
             const newState = { ...prev.GAMIFICATION };
             if (type === 'diamond') newState.diamonds += (value as number);
@@ -575,10 +637,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { ...prev, GAMIFICATION: newState };
         });
     };
-    const collectSpaceJunk = (junk: SpaceJunk) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, junkInventory: [...prev.GAMIFICATION.junkInventory, junk] } })); };
+    const collectSpaceJunk = (junk: SpaceJunk) => { 
+        playSound('success');
+        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, junkInventory: [...prev.GAMIFICATION.junkInventory, junk] } })); 
+    };
     const recycleSpaceJunk = (junkId: string) => {
         const junk = db.GAMIFICATION.junkInventory.find(j => j.id === junkId);
         if (!junk) return;
+        playSound('cash');
         setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, points: prev.GAMIFICATION.points + junk.xpValue, junkInventory: prev.GAMIFICATION.junkInventory.filter(j => j.id !== junkId) } }));
     };
     const awardXP = (amount: number) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, points: prev.GAMIFICATION.points + amount } })); };
@@ -591,6 +657,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const newMsgPayload = { id, from: fromId, to: toId, text, timestamp: new Date(), challenge, intel, trade, gradeDispute, reward, squadronInvite };
 
         try {
+            playSound('sent'); // Optimistic sound
             // Optimistic update
             setDb(prev => {
                 const key = [fromId, toId].sort().join('_');
@@ -611,6 +678,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
 
         try {
+            playSound('sent');
             // Optimistic update
             setDb(prev => {
                 const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
@@ -621,8 +689,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (e) { console.error("Failed to send group message:", e); }
     };
 
+    const deleteGroupMessage = async (groupId: string, msgId: string) => {
+        try {
+            playSound('error'); // Deletion sound
+            // Optimistically remove from state
+            setDb(prev => {
+                const groupMsgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
+                return {
+                    ...prev,
+                    GROUP_CHAT_MESSAGES: {
+                        ...prev.GROUP_CHAT_MESSAGES,
+                        [groupId]: groupMsgs.filter(m => m.id !== msgId)
+                    }
+                };
+            });
+
+            await fetch(`${BACKEND_URL}/group-chat/${msgId}`, { method: 'DELETE' });
+        } catch (e) {
+            console.error("Failed to delete group message:", e);
+        }
+    };
+
     const joinGroup = async (groupId: string, userId: string, inviteMsgId?: string) => {
         try {
+            playSound('success');
             setDb(prev => {
                 const groups = prev.STUDY_GROUPS.map(g => g.id === groupId && !g.members.includes(userId) ? { ...g, members: [...g.members, userId] } : g);
                 const updatedUsers = { ...prev.USERS, [userId]: { ...prev.USERS[userId], squadronId: groupId } };
@@ -648,6 +738,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const id = `g_${Date.now()}`;
         const newGroup = { id, name, members: [creatorId] };
         try {
+            playSound('success');
             setDb(prev => ({ 
                 ...prev, STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
                 USERS: { ...prev.USERS, [creatorId]: { ...prev.USERS[creatorId], squadronId: id } }
@@ -669,6 +760,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const resolveSOS = async (groupId: string, msgId: string, rescuerId: string) => {
         try {
+            playSound('level_up');
             const rescuerName = db.USERS[rescuerId]?.name || rescuerId;
             // No need to setDb here if using sockets, as the update event will come back. 
             // But keeping optimistic for responsiveness is good.
@@ -689,7 +781,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         sendChatMessage(teacherId, studentId, message, undefined, undefined, undefined, undefined, rewardData);
     };
 
-    const createFlashcardDeck = (title: string, cards: Flashcard[]) => { setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [`fd_${Date.now()}`]: { id: `fd_${Date.now()}`, title, cards } } })); };
+    const createFlashcardDeck = (title: string, cards: Flashcard[]) => { 
+        playSound('success');
+        setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [`fd_${Date.now()}`]: { id: `fd_${Date.now()}`, title, cards } } })); 
+    };
     const addFlashcardToDeck = (deckId: string, cards: Flashcard[]) => {
         setDb(prev => {
             const deck = prev.FLASHCARD_DECKS[deckId];
@@ -707,6 +802,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const createStandaloneQuiz = (title: string, questions: QuizQuestion[]) => {
+        playSound('success');
         const quizId = `qz_sa_${Date.now()}`;
         const assignId = `sa_${Date.now()}`;
         setDb(prev => ({
@@ -721,6 +817,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // --- NOTEBOOK SYNC ---
     const createPersonalNote = async (userId: string, title: string, content: string, links?: any) => {
         try {
+            playSound('success');
             const res = await fetch(`${BACKEND_URL}/notes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, title, content, linkedAssignmentId: links?.assignmentId, linkedPathId: links?.pathId }) });
             const newNote = await res.json();
             setDb(prev => ({ ...prev, PERSONAL_NOTES: { ...prev.PERSONAL_NOTES, [newNote._id]: { ...newNote, id: newNote._id } } }));
@@ -755,7 +852,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const unlockSharedNote = (noteId: string, userId: string) => {
         const note = db.PERSONAL_NOTES[noteId];
         if (!note) return;
-        if (db.GAMIFICATION.points < 5) throw new Error("Not enough XP to unlock.");
+        if (db.GAMIFICATION.points < 5) {
+            playSound('error');
+            throw new Error("Not enough XP to unlock.");
+        }
+        playSound('cash');
         setDb(prev => ({
             ...prev,
             PERSONAL_NOTES: { ...prev.PERSONAL_NOTES, [noteId]: { ...note, unlockedBy: [...(note.unlockedBy || []), userId] } },
@@ -763,6 +864,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }));
     };
     const addNoteComment = (noteId: string, userId: string, content: string, highlightedText?: string) => {
+        playSound('sent');
         updatePersonalNote(noteId, { comments: [...(db.PERSONAL_NOTES[noteId]?.comments || []), { id: `c${Date.now()}`, userId, userName: db.USERS[userId]?.name || userId, content, highlightedText, timestamp: new Date().toISOString() } as any] });
     };
 
@@ -778,6 +880,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
             const res = await fetch(`${BACKEND_URL}/paths`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPath) });
             if (!res.ok) throw new Error("Failed to save path");
+            playSound('success');
             setDb(prev => {
                 let newGamification = prev.GAMIFICATION;
                 if (wagerAmount) { newGamification = { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds - wagerAmount }; }
@@ -818,6 +921,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const unlockNextNode = (pathId: string, nodeId: string) => {
+        playSound('level_up');
         setDb(prev => {
             const path = prev.LEARNING_PATHS[pathId];
             if (!path) return prev;
@@ -968,12 +1072,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return (
         <DataContext.Provider value={{
-            db, syncUserToDb, unreadCounts, resetUnreadCount, // Exported new context values
+            db, syncUserToDb, unreadCounts, resetUnreadCount, playSound,
             setApiKey, markLessonComplete, submitFileAssignment, gradeFileSubmission, submitQuiz, updateQuizQuestions,
             addDiscussionPost, addVideoNote, deleteVideoNote, runMockTest, toggleUserLock, deleteUser, sendAnnouncement, unlockAllUsers,
             registerUser, completeOnboarding, dismissAnnouncement, markNotificationRead, buyShopItem, equipShopItem, equipPet,
             checkDailyDiamondReward, unlockSecretReward, collectSpaceJunk, recycleSpaceJunk, awardXP, restoreStreak,
-            recordSpeedRunResult, sendChatMessage, sendGroupMessage, joinGroup, createGroup, createRaidParty, resolveSOS, processTrade,
+            recordSpeedRunResult, sendChatMessage, sendGroupMessage, deleteGroupMessage, joinGroup, createGroup, createRaidParty, resolveSOS, processTrade,
             createFlashcardDeck, addFlashcardToDeck, updateFlashcardInDeck, createStandaloneQuiz, updateScratchpad, createPersonalNote, updatePersonalNote,
             deletePersonalNote, saveNodeNote, savePdfToNote, getPdfForNote, removePdfFromNote, shareNoteToSquadron, unshareNote,
             unlockSharedNote, addNoteComment, createLearningPath, assignLearningPath, updateNodeProgress, unlockNextNode, extendLearningPath,

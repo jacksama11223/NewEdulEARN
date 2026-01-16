@@ -201,6 +201,7 @@ const Navigation: React.FC = () => {
         { id: 'admin_create_course', label: 'Khởi tạo Khóa học', icon: '🎓', action: 'hover_write' }, 
         { id: 'admin_resilience', label: 'Resilience', icon: '🔧', action: 'hover_mechanic' },
         { id: 'deployment', label: 'Deployment', icon: '🚀', action: 'hover_btn' },
+        { id: 'group_chat', label: 'Giám sát Phi Đội', icon: '🛸', action: 'hover_detective', badge: unreadCounts.group },
         { id: 'security', label: 'Security', icon: '🛡️', action: 'hover_scared' },
       ];
     }

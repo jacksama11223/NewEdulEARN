@@ -605,9 +605,9 @@ const NotebookPage: React.FC = () => {
                 </div>
             )}
 
-            {/* DRAFTING TRAY (FLOATING) */}
+            {/* DRAFTING TRAY (FLOATING) - MOVED TO BOTTOM LEFT */}
             {draftCards.length > 0 && (
-                <div className="fixed bottom-6 right-6 z-[60] bg-gray-900/90 backdrop-blur-xl border border-yellow-500/50 rounded-2xl shadow-[0_0_30px_rgba(234,179,8,0.3)] p-4 animate-slide-up w-72 flex flex-col gap-3">
+                <div className="fixed bottom-6 left-6 z-[80] bg-gray-900/90 backdrop-blur-xl border border-yellow-500/50 rounded-2xl shadow-[0_0_30px_rgba(234,179,8,0.3)] p-4 animate-slide-up w-72 flex flex-col gap-3">
                     <div className="flex justify-between items-center border-b border-white/10 pb-2">
                         <span className="text-yellow-400 font-bold text-sm uppercase tracking-wider flex items-center gap-2">
                             <span>🗂️</span> Đang soạn ({draftCards.length})
@@ -641,9 +641,11 @@ const NotebookPage: React.FC = () => {
                                 }));
                                 // CHANGED: Pass user.id
                                 createFlashcardDeck(user.id, draftDeckTitle, realCards);
-                                alert(`✅ Đã tạo bộ thẻ "${draftDeckTitle}" thành công!`);
+                                alert(`✅ Đã tạo bộ thẻ "${draftDeckTitle}" với ${realCards.length} thẻ thành công!`);
+                                // Reset Draft
                                 setDraftCards([]);
                                 setDraftDeckTitle('');
+                                setIsDraftEditorOpen(false);
                             }}
                             className="btn btn-xs flex-1 btn-primary bg-yellow-600 hover:bg-yellow-500 text-black font-bold"
                         >

@@ -195,14 +195,22 @@ router.post('/notes', async (req, res) => {
 
 router.put('/notes/:id', async (req, res) => {
     try {
-        const note = await PersonalNote.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        // FIXED: Use findOneAndUpdate with the custom 'id' field instead of findByIdAndUpdate (which uses _id)
+        const note = await PersonalNote.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+        if (!note) {
+            return res.status(404).json({ message: "Note not found" });
+        }
         res.json(note);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
 router.delete('/notes/:id', async (req, res) => {
     try {
-        await PersonalNote.findByIdAndDelete(req.params.id);
+        // FIXED: Use findOneAndDelete with the custom 'id' field
+        const note = await PersonalNote.findOneAndDelete({ id: req.params.id });
+        if (!note) {
+            return res.status(404).json({ message: "Note not found" });
+        }
         res.json({ message: "Deleted" });
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
@@ -224,6 +232,9 @@ router.post('/tasks', async (req, res) => {
 
 router.put('/tasks/:id', async (req, res) => {
     try {
+        // Assuming Task might use _id if not specified otherwise, but for consistency if using custom id:
+        // const task = await Task.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+        // Keeping original logic if Tasks don't have custom string ID in schema, otherwise update:
         const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
         res.json(task);
     } catch (error) { res.status(400).json({ message: error.message }); }

@@ -44,7 +44,9 @@ const SOUNDS = {
     // NEW: Tiếng ăn mừng lớn (Victory/Celebration) - Dùng khi đạt điểm cao, streak
     celebration: 'https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3', 
     // NEW: Tiếng nhận thưởng (Pop/Collect) - Dùng khi nhặt rác, nhận quà
-    reward: 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3' 
+    reward: 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3',
+    // NEW: Cherry MX Black (Linear/Thocky) - Deeper sound, less high-pitch click
+    keyboard_mech: 'https://assets.mixkit.co/active_storage/sfx/2364/2364-preview.mp3'
 };
 
 type SoundType = keyof typeof SOUNDS;
@@ -240,6 +242,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         else if (type === 'sent') audio.volume = 0.3;
         else if (type === 'celebration') audio.volume = 0.6; // Louder for celebration
         else if (type === 'reward') audio.volume = 0.5;
+        else if (type === 'keyboard_mech') {
+            audio.volume = 0.2; // Softer volume for Thocky sound (was 0.25)
+            audio.currentTime = 0; // Ensure immediate replay for fast typers
+        }
         else audio.volume = 0.5; 
 
         audio.play().catch(e => {
@@ -315,13 +321,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
         };
 
-        // Removed Keyboard Listener as requested
+        // NEW: KEYBOARD TYPING SOUND LISTENER
+        const handleGlobalTyping = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement;
+            const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+            
+            // Only play sound if typing in an input field and not holding down key
+            if (isInput && !e.repeat) {
+                // Ignore modifier keys to reduce noise
+                const ignoredKeys = ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'];
+                if (!ignoredKeys.includes(e.key)) {
+                    playSound('keyboard_mech');
+                }
+            }
+        };
 
         // Use 'mousedown' for instant feedback before 'click' logic fires
         window.addEventListener('mousedown', handleGlobalInteraction);
+        window.addEventListener('keydown', handleGlobalTyping);
 
         return () => {
             window.removeEventListener('mousedown', handleGlobalInteraction);
+            window.removeEventListener('keydown', handleGlobalTyping);
         };
     }, []);
 
@@ -836,7 +857,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             await fetch(`${BACKEND_URL}/groups/${groupId}/join`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId }) });
             
             // Join socket room
-            if (socket) socket.emit('join_group', groupId);
+            if (socket) {
+                socket.emit('join_group', groupId);
+            }
 
         } catch (e) { console.error("Failed to join group:", e); }
     };

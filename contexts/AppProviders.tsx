@@ -774,11 +774,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const registerUser = async (u: string, p: string, name: string, role: any) => {
-        // In real app, API call. Here mock update.
-        updateDb(prev => ({
-            ...prev,
-            USERS: { ...prev.USERS, [u]: { id: u, password: p, name, role, isLocked: false, apiKey: null, hasSeenOnboarding: false, gamification: { points: 0, diamonds: 0, inventory: ['skin_default'], equippedSkin: 'skin_default' } as any } }
-        }));
+        try {
+            // GỌI API ĐĂNG KÝ XUỐNG SERVER
+            const response = await fetch(`${BACKEND_URL}/auth/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: u, password: p, name, role }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || "Đăng ký thất bại");
+            }
+
+            // Cập nhật giao diện ngay lập tức (Optimistic UI)
+            updateDb(prev => ({
+                ...prev,
+                USERS: { ...prev.USERS, [u]: { id: u, password: p, name, role, isLocked: false, apiKey: null, hasSeenOnboarding: false, gamification: { points: 0, diamonds: 0, inventory: ['skin_default'], equippedSkin: 'skin_default' } as any } }
+            }));
+        } catch (e) {
+            console.error("Registration error:", e);
+            throw e; // Ném lỗi để màn hình đăng ký hiển thị thông báo đỏ
+        }
     };
 
     const completeOnboarding = (userId: string) => {

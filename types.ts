@@ -244,6 +244,7 @@ export interface ChatMessage {
 
 export interface GroupChatMessage {
     id: string;
+    groupId: string;
     user: { id: string, name: string, role: string };
     text: string;
     timestamp: Date;

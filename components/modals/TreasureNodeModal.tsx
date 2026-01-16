@@ -105,7 +105,7 @@ const TreasureNodeModal: React.FC<TreasureNodeModalProps> = ({ isOpen, onClose, 
                 <div className="flex flex-col items-center justify-center py-12">
                     <LoadingSpinner size={10} />
                     <p className="mt-4 text-purple-300 font-bold animate-pulse">Sphinx đang suy nghĩ câu đố...</p>
-                    <p className="text-xs text-gray-500">Gemini 3 Pro Thinking Mode</p>
+                    <p className="text-xs text-gray-500">Gemini 2.5 Flash Thinking</p>
                 </div>
             )}
 

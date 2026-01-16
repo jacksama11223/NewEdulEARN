@@ -372,7 +372,7 @@ const AssignmentViewerPage: React.FC<AssignmentViewerPageProps> = ({ assignmentI
 
         setIsGenerating(true);
         try {
-            // Updated Prompt to use Gemini 3 Pro (Thinking Mode) via generic call
+            // Updated Prompt to use Gemini 2.5 Flash (Thinking Mode) via generic call
             const prompt = `
                 You are an expert exam creator. Create 5 high-quality, distinct multiple choice questions for a quiz titled "${assignment.title}".
                 
@@ -542,7 +542,7 @@ const AssignmentViewerPage: React.FC<AssignmentViewerPageProps> = ({ assignmentI
                                                     ✏️ Soạn thủ công
                                                 </button>
                                             </div>
-                                            {isGenerating && <p className="text-xs text-gray-500 animate-pulse">Đang sử dụng Gemini 3 Pro (Thinking Mode) để tạo câu hỏi chất lượng cao...</p>}
+                                            {isGenerating && <p className="text-xs text-gray-500 animate-pulse">Đang sử dụng Gemini 2.5 Flash (Thinking Mode) để tạo câu hỏi chất lượng cao...</p>}
                                         </div>
                                     ) : (
                                         <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700">

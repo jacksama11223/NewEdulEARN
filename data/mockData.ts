@@ -169,10 +169,10 @@ export const MOCK_DATA: Database = {
   },
   GROUP_CHAT_MESSAGES: {
      "g1": [
-       { id: "gmsg1", user: { id: "sv002", name: "Lê Thị C", role: "STUDENT"}, text: "Tuần sau thi rồi mọi người ơi", timestamp: new Date(Date.now() - 200000) }
+       { id: "gmsg1", groupId: "g1", user: { id: "sv002", name: "Lê Thị C", role: "STUDENT"}, text: "Tuần sau thi rồi mọi người ơi", timestamp: new Date(Date.now() - 200000) }
     ],
     "g2": [
-       { id: "gmsg2", user: { id: "sv001", name: "Hoàng Đăng Quang", role: "STUDENT"}, text: "Chào mọi người, em mới tham gia nhóm.", timestamp: new Date(Date.now() - 100000) }
+       { id: "gmsg2", groupId: "g2", user: { id: "sv001", name: "Hoàng Đăng Quang", role: "STUDENT"}, text: "Chào mọi người, em mới tham gia nhóm.", timestamp: new Date(Date.now() - 100000) }
     ]
   },
   WAF_LOGS: [

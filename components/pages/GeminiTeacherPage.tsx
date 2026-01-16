@@ -294,7 +294,7 @@ const GeminiTeacherPage: React.FC = () => {
         {
             targetId: 'input-chat-prompt',
             title: 'Ra lệnh',
-            content: 'Sau đó ra lệnh soạn giáo án tại đây. Gemini 3 Pro sẽ suy nghĩ và tạo ra nội dung chất lượng cao.',
+            content: 'Sau đó ra lệnh soạn giáo án tại đây. AI sẽ suy nghĩ và tạo ra nội dung chất lượng cao.',
             position: 'top'
         }
     ];

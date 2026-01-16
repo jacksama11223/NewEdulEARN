@@ -3,21 +3,17 @@ import React, { useState, useEffect, useContext, createContext, useMemo, useCall
 import { MOCK_DATA } from '../data/mockData.ts';
 import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson } from '../types.ts';
 import { convertContentToFlashcards, generateLegacyArchiveContent } from '../services/geminiService.ts';
+import { io, Socket } from 'socket.io-client';
 
 // --- CONFIG URL BACKEND ---
 const getBackendUrl = () => {
-    // 1. Lấy URL từ biến môi trường
     let url = (import.meta as any).env.VITE_BACKEND_URL;
-    
-    // 2. Nếu không có (đang chạy local), dùng localhost
     if (!url) {
         if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            console.error("⚠️ CẢNH BÁO: Chưa cấu hình VITE_BACKEND_URL trên Vercel/Netlify. App sẽ cố kết nối localhost và có thể thất bại.");
+            console.error("⚠️ CẢNH BÁO: Chưa cấu hình VITE_BACKEND_URL.");
         }
         url = 'http://localhost:5000';
     }
-
-    // 3. Xóa dấu gạch chéo '/' ở cuối nếu có (để tránh lỗi //api)
     return url.replace(/\/$/, "");
 };
 
@@ -177,166 +173,172 @@ export const PetContext = createContext<PetContextType | null>(null);
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [db, setDb] = useState<Database>(MOCK_DATA);
     const [pdfStorage, setPdfStorage] = useState<Record<string, File>>({});
+    
+    // --- REAL-TIME SOCKET CONNECTION ---
+    const [socket, setSocket] = useState<Socket | null>(null);
 
-    // --- GLOBAL DATA FETCHING (Assignments, Quizzes, COURSES, LESSONS) ---
-    // Fetch global content that doesn't depend on user login
+    // Initial Data Fetch
+    useEffect(() => {
+        fetchGlobalData();
+    }, []);
+
+    // --- GLOBAL DATA FETCHING ---
     const fetchGlobalData = useCallback(async () => {
         try {
             console.log("Fetching global data from:", BACKEND_URL);
             
-            // 1. Fetch Courses (contains structure)
-            const coursesRes = await fetch(`${BACKEND_URL}/courses`);
-            if (!coursesRes.ok) throw new Error("Failed to fetch courses");
-            const coursesData: any[] = await coursesRes.json();
-            
+            // Parallel fetch for speed
+            const [coursesRes, lessonsRes, assignRes, quizzesRes, subRes, usersRes] = await Promise.all([
+                fetch(`${BACKEND_URL}/courses`),
+                fetch(`${BACKEND_URL}/lessons`),
+                fetch(`${BACKEND_URL}/assignments`),
+                fetch(`${BACKEND_URL}/quizzes`),
+                fetch(`${BACKEND_URL}/quiz-submissions`),
+                fetch(`${BACKEND_URL}/users`)
+            ]);
+
+            const coursesData = await coursesRes.json();
+            const lessonsData = await lessonsRes.json();
+            const assignments = await assignRes.json();
+            const quizzes = await quizzesRes.json();
+            const submissions = await subRes.json();
+            const usersData = await usersRes.json();
+
+            // Transform Data
             const coursesList: Course[] = [];
             const courseStructure: Record<string, CourseStructure> = {};
-
-            coursesData.forEach(c => {
-                // Split backend model into frontend separate states
-                coursesList.push({
-                    id: c.id,
-                    name: c.name,
-                    teacher: c.teacher,
-                    defaultPersona: c.defaultPersona
-                });
+            coursesData.forEach((c: any) => {
+                coursesList.push({ id: c.id, name: c.name, teacher: c.teacher, defaultPersona: c.defaultPersona });
                 courseStructure[c.id] = { modules: c.modules || [] };
             });
 
-            // 2. Fetch Lessons (Content)
-            const lessonsRes = await fetch(`${BACKEND_URL}/lessons`);
-            if (!lessonsRes.ok) throw new Error("Failed to fetch lessons");
-            const lessonsData: Lesson[] = await lessonsRes.json();
             const lessonsMap: Record<string, Lesson> = {};
-            lessonsData.forEach(l => { lessonsMap[l.id] = l; });
+            lessonsData.forEach((l: any) => { lessonsMap[l.id] = l; });
 
-            // 3. Fetch Assignments
-            const assignRes = await fetch(`${BACKEND_URL}/assignments`);
-            if (!assignRes.ok) throw new Error("Failed to fetch assignments");
-            const assignments: Assignment[] = await assignRes.json();
             const assignMap: Record<string, Assignment> = {};
-            assignments.forEach(a => { assignMap[a.id] = a; });
+            assignments.forEach((a: any) => { assignMap[a.id] = a; });
 
-            // 4. Fetch Quizzes
-            const quizzesRes = await fetch(`${BACKEND_URL}/quizzes`);
-            if (!quizzesRes.ok) throw new Error("Failed to fetch quizzes");
-            const quizzes: Quiz[] = await quizzesRes.json();
             const quizMap: Record<string, Quiz> = {};
-            quizzes.forEach(q => { quizMap[q.id] = q; });
+            quizzes.forEach((q: any) => { quizMap[q.id] = q; });
 
-            // 5. Fetch Quiz Submissions
-            const subRes = await fetch(`${BACKEND_URL}/quiz-submissions`);
-            if (!subRes.ok) throw new Error("Failed to fetch submissions");
-            const submissions: QuizSubmission[] = await subRes.json();
             const subMap: Record<string, Record<string, QuizSubmission>> = {};
-            // Group by QuizId then StudentId
             submissions.forEach((s: any) => {
                 if (!subMap[s.quizId]) subMap[s.quizId] = {};
                 subMap[s.quizId][s.studentId] = s;
             });
 
-            // 6. FETCH ALL USERS (FOR CONTACTS & STATUS)
-            // This is important to get the current isOnline status of everyone
-            const usersRes = await fetch(`${BACKEND_URL}/users`);
-            if (!usersRes.ok) throw new Error("Failed to fetch users");
-            const usersData: any[] = await usersRes.json();
             const usersMap: Record<string, User> = {};
-            usersData.forEach(u => {
-                usersMap[u.id] = {
-                    id: u.id,
-                    name: u.name,
-                    role: u.role,
-                    isLocked: u.isLocked,
-                    apiKey: null, // Don't expose keys broadly
-                    squadronId: u.squadronId,
-                    hasSeenOnboarding: u.hasSeenOnboarding,
-                    // Inject dynamic online status from backend (calculated by virtual)
-                    isOnline: u.isOnline 
-                } as User;
+            usersData.forEach((u: any) => {
+                usersMap[u.id] = { ...u, apiKey: null };
             });
 
             setDb(prev => ({
                 ...prev,
-                COURSES: [...prev.COURSES, ...coursesList.filter(nc => !prev.COURSES.some(ec => ec.id === nc.id))], // Merge without dupes
-                COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, ...courseStructure },
-                LESSONS: { ...prev.LESSONS, ...lessonsMap },
-                ASSIGNMENTS: { ...prev.ASSIGNMENTS, ...assignMap },
-                QUIZZES: { ...prev.QUIZZES, ...quizMap },
-                QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, ...subMap },
-                USERS: { ...prev.USERS, ...usersMap } // Merge users to update status
+                COURSES: coursesList,
+                COURSE_STRUCTURE: courseStructure,
+                LESSONS: lessonsMap,
+                ASSIGNMENTS: assignMap,
+                QUIZZES: quizMap,
+                QUIZ_SUBMISSIONS: subMap,
+                USERS: { ...prev.USERS, ...usersMap }
             }));
         } catch (e) {
             console.error("Failed to fetch global data:", e);
         }
     }, []);
 
-    // Trigger global fetch on mount
-    useEffect(() => {
-        fetchGlobalData();
-    }, [fetchGlobalData]);
-
     // --- REFRESH USER STATUS LOOP ---
-    // Polling mechanism to keep "isOnline" statuses updated for contacts
     useEffect(() => {
         const interval = setInterval(() => {
             fetch(`${BACKEND_URL}/users`)
                 .then(res => res.json())
                 .then((usersData: any[]) => {
                     const usersMap: Record<string, User> = {};
-                    usersData.forEach(u => {
-                        usersMap[u.id] = {
-                            id: u.id,
-                            name: u.name,
-                            role: u.role,
-                            isLocked: u.isLocked,
-                            apiKey: null,
-                            squadronId: u.squadronId,
-                            hasSeenOnboarding: u.hasSeenOnboarding,
-                            isOnline: u.isOnline
-                        } as User;
-                    });
+                    usersData.forEach(u => { usersMap[u.id] = { ...u, apiKey: null }; });
                     setDb(prev => ({ ...prev, USERS: { ...prev.USERS, ...usersMap } }));
                 })
                 .catch(e => console.error("Status sync error:", e));
-        }, 30000); // Check every 30s
-
+        }, 30000); 
         return () => clearInterval(interval);
     }, []);
 
-    // --- CRITICAL FIX: Sync User To DB immediately ---
-    // This prevents white screen after registration/login by manually injecting the user into the local DB state
+    // --- SYNC USER TO DB ---
     const syncUserToDb = useCallback((user: User) => {
         setDb(prev => {
-            // Merge gamification if available on user object (from backend response)
             const userGamification = (user as any).gamification;
-            
             return {
                 ...prev,
-                USERS: {
-                    ...prev.USERS,
-                    [user.id]: { ...user, isOnline: true }
-                },
-                // Initialize arrays to prevent undefined errors in widgets
-                LESSON_PROGRESS: {
-                    ...prev.LESSON_PROGRESS,
-                    [user.id]: prev.LESSON_PROGRESS[user.id] || []
-                },
-                NOTIFICATIONS: {
-                    ...prev.NOTIFICATIONS,
-                    [user.id]: prev.NOTIFICATIONS[user.id] || []
-                },
-                // Update global gamification state to reflect current user
+                USERS: { ...prev.USERS, [user.id]: { ...user, isOnline: true } },
+                LESSON_PROGRESS: { ...prev.LESSON_PROGRESS, [user.id]: prev.LESSON_PROGRESS[user.id] || [] },
+                NOTIFICATIONS: { ...prev.NOTIFICATIONS, [user.id]: prev.NOTIFICATIONS[user.id] || [] },
                 GAMIFICATION: userGamification || prev.GAMIFICATION
             };
         });
-    }, []);
 
-    // --- SYNC WITH BACKEND (OPTIMIZED: PARALLEL FETCHING) ---
+        // --- INIT SOCKET CONNECTION ---
+        if (!socket) {
+            const newSocket = io(BASE_URL);
+            setSocket(newSocket);
+
+            newSocket.on('connect', () => {
+                console.log('✅ Socket Connected');
+                // Join personal room
+                newSocket.emit('join_user', user.id);
+            });
+
+            // Listen for 1-on-1 Messages
+            newSocket.on('receive_message', (msg: ChatMessage) => {
+                setDb(prev => {
+                    const key = [msg.from, msg.to].sort().join('_');
+                    const existingMsgs = prev.CHAT_MESSAGES[key] || [];
+                    // Deduplicate
+                    if (existingMsgs.some(m => m.id === msg.id)) return prev;
+                    return {
+                        ...prev,
+                        CHAT_MESSAGES: {
+                            ...prev.CHAT_MESSAGES,
+                            [key]: [...existingMsgs, { ...msg, timestamp: new Date(msg.timestamp) }]
+                        }
+                    };
+                });
+            });
+
+            // Listen for Group Messages
+            newSocket.on('receive_group_message', (msg: GroupChatMessage) => {
+                setDb(prev => {
+                    const existingMsgs = prev.GROUP_CHAT_MESSAGES[msg.groupId] || [];
+                    if (existingMsgs.some(m => m.id === msg.id)) return prev; // Dedupe
+                    return {
+                        ...prev,
+                        GROUP_CHAT_MESSAGES: {
+                            ...prev.GROUP_CHAT_MESSAGES,
+                            [msg.groupId]: [...existingMsgs, { ...msg, timestamp: new Date(msg.timestamp) }] // Fix date string
+                        }
+                    };
+                });
+            });
+
+            // Listen for Updates (e.g. SOS Resolved)
+            newSocket.on('receive_group_message_update', (updatedMsg: GroupChatMessage) => {
+                setDb(prev => {
+                    const groupMsgs = prev.GROUP_CHAT_MESSAGES[updatedMsg.groupId] || [];
+                    const newMsgs = groupMsgs.map(m => m.id === updatedMsg.id ? { ...updatedMsg, timestamp: new Date(updatedMsg.timestamp) } : m);
+                    return {
+                        ...prev,
+                        GROUP_CHAT_MESSAGES: {
+                            ...prev.GROUP_CHAT_MESSAGES,
+                            [updatedMsg.groupId]: newMsgs
+                        }
+                    };
+                });
+            });
+        }
+    }, [socket]);
+
+    // --- SYNC WITH BACKEND ---
     const fetchUserData = useCallback(async (userId: string) => {
         try {
             console.log("Fetching user data for:", userId);
-            
-            // Execute all fetches in parallel
             const [notesRes, tasksRes, chatRes, groupsRes, groupChatRes, pathsRes] = await Promise.all([
                 fetch(`${BACKEND_URL}/notes/${userId}`),
                 fetch(`${BACKEND_URL}/tasks/${userId}`),
@@ -347,46 +349,32 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ]);
 
             const [notes, tasks, chatMessages, groups, groupMessages, paths] = await Promise.all([
-                notesRes.json(),
-                tasksRes.json(),
-                chatRes.json(),
-                groupsRes.json(),
-                groupChatRes.json(),
-                pathsRes.json()
+                notesRes.json(), tasksRes.json(), chatRes.json(), groupsRes.json(), groupChatRes.json(), pathsRes.json()
             ]);
 
-            // Process Notes
             const notesMap: Record<string, PersonalNote> = {};
             (notes as any[]).forEach(n => { notesMap[n._id || n.id] = { ...n, id: n._id || n.id }; });
 
-            // Process Tasks
             const tasksMap: Record<string, Task> = {};
             (tasks as any[]).forEach(t => { tasksMap[t._id || t.id] = { ...t, id: t._id || t.id }; });
 
-            // Process Chat
             const chatMap: Record<string, ChatMessage[]> = {};
             (chatMessages as ChatMessage[]).forEach(msg => {
                 const key = [msg.from, msg.to || ''].sort().join('_');
                 if (!chatMap[key]) chatMap[key] = [];
-                const formattedMsg = { ...msg, id: (msg as any)._id || msg.id };
-                chatMap[key].push(formattedMsg);
+                chatMap[key].push({ ...msg, id: (msg as any)._id || msg.id });
             });
 
-            // Process Groups
             const formattedGroups = (groups as any[]).map((g: any) => ({ ...g, id: g.id || g._id }));
 
-            // Process Group Messages
             const groupChatMap: Record<string, GroupChatMessage[]> = {};
             (groupMessages as any[]).forEach(msg => {
                 if (!groupChatMap[msg.groupId]) groupChatMap[msg.groupId] = [];
                 groupChatMap[msg.groupId].push({ ...msg, id: msg.id || msg._id });
             });
 
-            // Process Learning Paths
             const pathsMap: Record<string, LearningPath> = {};
-            (paths as LearningPath[]).forEach((p: any) => { 
-                pathsMap[p.id] = { ...p, id: p.id || p._id }; 
-            });
+            (paths as LearningPath[]).forEach((p: any) => { pathsMap[p.id] = { ...p, id: p.id || p._id }; });
 
             setDb(prev => ({
                 ...prev,
@@ -397,26 +385,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 GROUP_CHAT_MESSAGES: groupChatMap,
                 LEARNING_PATHS: pathsMap
             }));
+
+            // Socket: Join group rooms now that we know them
+            if (socket) {
+                formattedGroups.forEach((g: StudyGroup) => {
+                    if (g.members.includes(userId)) {
+                        socket.emit('join_group', g.id);
+                    }
+                });
+            }
+
         } catch (e) {
-            console.error("Failed to fetch user data from server:", e);
+            console.error("Failed to fetch user data:", e);
         }
-    }, []);
+    }, [socket]);
 
     const setApiKey = (userId: string, key: string) => {
-        setDb(prev => ({
-            ...prev,
-            USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], apiKey: key } }
-        }));
+        setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], apiKey: key } } }));
     };
 
     const markLessonComplete = (userId: string, lessonId: string) => {
         setDb(prev => {
             const current = prev.LESSON_PROGRESS[userId] || [];
             if (!current.includes(lessonId)) {
-                return {
-                    ...prev,
-                    LESSON_PROGRESS: { ...prev.LESSON_PROGRESS, [userId]: [...current, lessonId] }
-                };
+                return { ...prev, LESSON_PROGRESS: { ...prev.LESSON_PROGRESS, [userId]: [...current, lessonId] } };
             }
             return prev;
         });
@@ -426,16 +418,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setDb(prev => {
             const subs = prev.FILE_SUBMISSIONS[assignmentId] || [];
             const idx = subs.findIndex(s => s.studentId === studentId);
-            const newSub = {
-                id: `sub_${studentId}_${assignmentId}`,
-                studentId,
-                studentName: prev.USERS[studentId]?.name || studentId,
-                status: 'Đã nộp' as const,
-                grade: null,
-                feedback: null,
-                fileName,
-                timestamp: new Date().toISOString()
-            };
+            const newSub = { id: `sub_${studentId}_${assignmentId}`, studentId, studentName: prev.USERS[studentId]?.name || studentId, status: 'Đã nộp' as const, grade: null, feedback: null, fileName, timestamp: new Date().toISOString() };
             let newSubs = [...subs];
             if (idx >= 0) newSubs[idx] = newSub; else newSubs.push(newSub);
             return { ...prev, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [assignmentId]: newSubs } };
@@ -450,59 +433,27 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
 
-    // --- QUIZ SUBMISSION WITH PERSISTENCE ---
     const submitQuiz = async (quizId: string, userId: string, answers: Record<string, number>) => {
         const quiz = db.QUIZZES[quizId];
         let score = 0;
-        if (quiz) {
-            quiz.questions.forEach(q => { if (answers[q.id] === q.correctAnswer) score++; });
-        }
+        if (quiz) { quiz.questions.forEach(q => { if (answers[q.id] === q.correctAnswer) score++; }); }
         const total = quiz?.questions.length || 0;
         const percentage = total > 0 ? (score/total)*100 : 0;
         
-        const submissionPayload = {
-            quizId,
-            studentId: userId,
-            score,
-            total,
-            percentage,
-            answers,
-            timestamp: new Date().toISOString()
-        };
+        const submissionPayload = { quizId, studentId: userId, score, total, percentage, answers, timestamp: new Date().toISOString() };
 
-        // Optimistic Update
-        setDb(prev => ({
-            ...prev,
-            QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: { ...prev.QUIZ_SUBMISSIONS[quizId], [userId]: submissionPayload } }
-        }));
+        setDb(prev => ({ ...prev, QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: { ...prev.QUIZ_SUBMISSIONS[quizId], [userId]: submissionPayload } } }));
 
-        // Persist
         try {
-            await fetch(`${BACKEND_URL}/quiz-submissions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(submissionPayload)
-            });
-        } catch (e) {
-            console.error("Failed to persist quiz submission", e);
-        }
+            await fetch(`${BACKEND_URL}/quiz-submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submissionPayload) });
+        } catch (e) { console.error("Failed to persist quiz submission", e); }
     };
 
-    // --- QUIZ UPDATE WITH PERSISTENCE ---
     const updateQuizQuestions = async (quizId: string, questions: QuizQuestion[]) => {
-        // Optimistic Update
         setDb(prev => ({ ...prev, QUIZZES: { ...prev.QUIZZES, [quizId]: { ...prev.QUIZZES[quizId], questions } } }));
-        
-        // Persist
         try {
-            await fetch(`${BACKEND_URL}/quizzes`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: quizId, title: db.QUIZZES[quizId]?.title, questions })
-            });
-        } catch (e) {
-            console.error("Failed to update quiz questions", e);
-        }
+            await fetch(`${BACKEND_URL}/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: quizId, title: db.QUIZZES[quizId]?.title, questions }) });
+        } catch (e) { console.error("Failed to update quiz questions", e); }
     };
 
     const addDiscussionPost = (lessonId: string, user: User, text: string) => {
@@ -525,9 +476,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     const runMockTest = (type: 'unit' | 'integration' | 'e2e') => {
         setDb(prev => ({ ...prev, MOCK_TEST_RESULTS: { ...prev.MOCK_TEST_RESULTS, [type]: 'RUNNING' } }));
-        setTimeout(() => {
-            setDb(prev => ({ ...prev, MOCK_TEST_RESULTS: { ...prev.MOCK_TEST_RESULTS, [type]: Math.random() > 0.3 ? 'PASS' : 'FAIL' } }));
-        }, 3000);
+        setTimeout(() => { setDb(prev => ({ ...prev, MOCK_TEST_RESULTS: { ...prev.MOCK_TEST_RESULTS, [type]: Math.random() > 0.3 ? 'PASS' : 'FAIL' } })); }, 3000);
     };
     const toggleUserLock = (userId: string) => {
         setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], isLocked: !prev.USERS[userId].isLocked } } }));
@@ -545,47 +494,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const registerUser = async (u: string, p: string, name: string, role: any) => {
         try {
-            const response = await fetch(`${BACKEND_URL}/auth/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: u, password: p, name, role }),
-            });
+            const response = await fetch(`${BACKEND_URL}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: u, password: p, name, role }), });
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || "Registration failed");
-        } catch (error: any) {
-            console.error("Register Error:", error);
-            throw error;
-        }
+        } catch (error: any) { console.error("Register Error:", error); throw error; }
     };
 
-    const completeOnboarding = (userId: string) => {
-        setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], hasSeenOnboarding: true } } }));
-    };
-    const dismissAnnouncement = (id: string) => {
-        setDb(prev => ({ ...prev, ANNOUNCEMENTS: prev.ANNOUNCEMENTS.filter(a => a.id !== id) }));
-    };
+    const completeOnboarding = (userId: string) => { setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], hasSeenOnboarding: true } } })); };
+    const dismissAnnouncement = (id: string) => { setDb(prev => ({ ...prev, ANNOUNCEMENTS: prev.ANNOUNCEMENTS.filter(a => a.id !== id) })); };
     const markNotificationRead = (userId: string, notifId: string) => {
-        setDb(prev => ({
-            ...prev,
-            NOTIFICATIONS: { ...prev.NOTIFICATIONS, [userId]: (prev.NOTIFICATIONS[userId] || []).map(n => n.id === notifId ? { ...n, read: true } : n) }
-        }));
+        setDb(prev => ({ ...prev, NOTIFICATIONS: { ...prev.NOTIFICATIONS, [userId]: (prev.NOTIFICATIONS[userId] || []).map(n => n.id === notifId ? { ...n, read: true } : n) } }));
     };
     const buyShopItem = (itemId: string) => {
         const item = db.SHOP_ITEMS.find(i => i.id === itemId);
         if (!item) throw new Error("Item not found");
         const currency = item.currency === 'diamond' ? 'diamonds' : 'points';
         if (db.GAMIFICATION[currency] < item.cost) throw new Error("Not enough funds");
-        setDb(prev => ({
-            ...prev,
-            GAMIFICATION: { ...prev.GAMIFICATION, [currency]: prev.GAMIFICATION[currency] - item.cost, inventory: [...prev.GAMIFICATION.inventory, itemId] }
-        }));
+        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, [currency]: prev.GAMIFICATION[currency] - item.cost, inventory: [...prev.GAMIFICATION.inventory, itemId] } }));
     };
-    const equipShopItem = (itemId: string) => {
-        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, equippedSkin: itemId } }));
-    };
-    const equipPet = (itemId: string) => {
-        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, equippedPet: itemId } }));
-    };
+    const equipShopItem = (itemId: string) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, equippedSkin: itemId } })); };
+    const equipPet = (itemId: string) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, equippedPet: itemId } })); };
     const checkDailyDiamondReward = () => {
         const today = new Date().toDateString();
         if (db.GAMIFICATION.lastStudyDate !== today) {
@@ -602,78 +530,50 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { ...prev, GAMIFICATION: newState };
         });
     };
-    const collectSpaceJunk = (junk: SpaceJunk) => {
-        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, junkInventory: [...prev.GAMIFICATION.junkInventory, junk] } }));
-    };
+    const collectSpaceJunk = (junk: SpaceJunk) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, junkInventory: [...prev.GAMIFICATION.junkInventory, junk] } })); };
     const recycleSpaceJunk = (junkId: string) => {
         const junk = db.GAMIFICATION.junkInventory.find(j => j.id === junkId);
         if (!junk) return;
-        setDb(prev => ({
-            ...prev,
-            GAMIFICATION: { ...prev.GAMIFICATION, points: prev.GAMIFICATION.points + junk.xpValue, junkInventory: prev.GAMIFICATION.junkInventory.filter(j => j.id !== junkId) }
-        }));
+        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, points: prev.GAMIFICATION.points + junk.xpValue, junkInventory: prev.GAMIFICATION.junkInventory.filter(j => j.id !== junkId) } }));
     };
-    const awardXP = (amount: number) => {
-        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, points: prev.GAMIFICATION.points + amount } }));
-    };
-    const restoreStreak = () => {
-        setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, lastStudyDate: new Date().toDateString() } }));
-    };
-    const recordSpeedRunResult = (userId: string, score: number) => {
-        console.log(`User ${userId} scored ${score} in Speed Run`);
-    };
+    const awardXP = (amount: number) => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, points: prev.GAMIFICATION.points + amount } })); };
+    const restoreStreak = () => { setDb(prev => ({ ...prev, GAMIFICATION: { ...prev.GAMIFICATION, lastStudyDate: new Date().toDateString() } })); };
+    const recordSpeedRunResult = (userId: string, score: number) => { console.log(`User ${userId} scored ${score} in Speed Run`); };
     
-    // --- CHAT WITH MONGODB PERSISTENCE ---
+    // --- CHAT WITH SOCKET.IO ---
     const sendChatMessage = async (fromId: string, toId: string, text: string, challenge?: any, intel?: any, trade?: any, gradeDispute?: any, reward?: any, squadronInvite?: any) => {
-        const key = [fromId, toId].sort().join('_');
         const id = `msg_${Date.now()}`;
         const newMsgPayload = { id, from: fromId, to: toId, text, timestamp: new Date(), challenge, intel, trade, gradeDispute, reward, squadronInvite };
 
         try {
+            // Optimistic update
             setDb(prev => {
+                const key = [fromId, toId].sort().join('_');
                 const msgs = prev.CHAT_MESSAGES[key] || [];
                 return { ...prev, CHAT_MESSAGES: { ...prev.CHAT_MESSAGES, [key]: [...msgs, newMsgPayload] } };
             });
 
-            await fetch(`${BACKEND_URL}/chat/send`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newMsgPayload)
-            });
-        } catch (e) {
-            console.error("Failed to send chat message:", e);
-            alert("Lỗi kết nối! Tin nhắn có thể chưa được lưu.");
-        }
+            await fetch(`${BACKEND_URL}/chat/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMsgPayload) });
+        } catch (e) { console.error("Failed to send chat message:", e); }
     };
 
-    // --- GROUP CHAT WITH MONGODB PERSISTENCE ---
+    // --- GROUP CHAT WITH SOCKET.IO ---
     const sendGroupMessage = async (groupId: string, user: User, text: string, metadata?: { isSOS?: boolean, isWhisper?: boolean }) => {
         const id = `gmsg_${Date.now()}`;
         const newMsgPayload = {
-            id,
-            groupId,
-            user: { id: user.id, name: user.name, role: user.role },
-            text,
-            isSOS: metadata?.isSOS,
-            sosStatus: metadata?.isSOS ? 'PENDING' : undefined,
-            isWhisper: metadata?.isWhisper,
-            timestamp: new Date()
+            id, groupId, user: { id: user.id, name: user.name, role: user.role },
+            text, isSOS: metadata?.isSOS, sosStatus: metadata?.isSOS ? 'PENDING' : undefined, isWhisper: metadata?.isWhisper, timestamp: new Date()
         };
 
         try {
+            // Optimistic update
             setDb(prev => {
                 const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
                 return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: [...msgs, newMsgPayload] } };
             });
 
-            await fetch(`${BACKEND_URL}/group-chat/send`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newMsgPayload)
-            });
-        } catch (e) {
-            console.error("Failed to send group message:", e);
-        }
+            await fetch(`${BACKEND_URL}/group-chat/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMsgPayload) });
+        } catch (e) { console.error("Failed to send group message:", e); }
     };
 
     const joinGroup = async (groupId: string, userId: string, inviteMsgId?: string) => {
@@ -691,15 +591,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 return { ...prev, STUDY_GROUPS: groups, USERS: updatedUsers, CHAT_MESSAGES: newChats };
             });
 
-            await fetch(`${BACKEND_URL}/groups/${groupId}/join`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId })
-            });
+            await fetch(`${BACKEND_URL}/groups/${groupId}/join`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId }) });
+            
+            // Join socket room
+            if (socket) socket.emit('join_group', groupId);
 
-        } catch (e) {
-            console.error("Failed to join group:", e);
-        }
+        } catch (e) { console.error("Failed to join group:", e); }
     };
 
     const createGroup = async (name: string, creatorId: string) => {
@@ -707,65 +604,47 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const newGroup = { id, name, members: [creatorId] };
         try {
             setDb(prev => ({ 
-                ...prev, 
-                STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
+                ...prev, STUDY_GROUPS: [...prev.STUDY_GROUPS, newGroup],
                 USERS: { ...prev.USERS, [creatorId]: { ...prev.USERS[creatorId], squadronId: id } }
             }));
-
-            await fetch(`${BACKEND_URL}/groups`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newGroup)
-            });
-        } catch (e) {
-            console.error("Failed to create group:", e);
-        }
+            await fetch(`${BACKEND_URL}/groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newGroup) });
+            // Join new room
+            if (socket) socket.emit('join_group', id);
+        } catch (e) { console.error("Failed to create group:", e); }
     };
 
     const createRaidParty = (name: string, creatorId: string, memberIds: string[], bossName: string) => {
         const groupId = `g_raid_${Date.now()}`;
-        createGroup(name, creatorId); // Basic persistence
+        createGroup(name, creatorId);
         
         const systemText = `⚔️ RAID PARTY STARTED!\n\nTarget: **${bossName}**\n\nTất cả thành viên hãy phối hợp để tiêu diệt Boss (hoàn thành bài tập) trước khi hết giờ!`;
         const systemUser: User = { id: 'system', name: 'System', role: 'ADMIN', isLocked: false, apiKey: null, hasSeenOnboarding: true };
-        
-        setTimeout(() => {
-             sendGroupMessage(groupId, systemUser, systemText);
-        }, 500);
+        setTimeout(() => { sendGroupMessage(groupId, systemUser, systemText); }, 500);
     };
 
     const resolveSOS = async (groupId: string, msgId: string, rescuerId: string) => {
         try {
             const rescuerName = db.USERS[rescuerId]?.name || rescuerId;
-            
+            // No need to setDb here if using sockets, as the update event will come back. 
+            // But keeping optimistic for responsiveness is good.
             setDb(prev => {
                 const msgs = prev.GROUP_CHAT_MESSAGES[groupId] || [];
                 const newMsgs = msgs.map(m => m.id === msgId ? { ...m, sosStatus: 'RESOLVED', rescuerName } : m);
                 return { ...prev, GROUP_CHAT_MESSAGES: { ...prev.GROUP_CHAT_MESSAGES, [groupId]: newMsgs } };
             });
 
-            await fetch(`${BACKEND_URL}/group-chat/${msgId}/resolve`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rescuerName })
-            });
-        } catch (e) {
-            console.error("Failed to resolve SOS:", e);
-        }
+            await fetch(`${BACKEND_URL}/group-chat/${msgId}/resolve`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rescuerName }) });
+        } catch (e) { console.error("Failed to resolve SOS:", e); }
     };
 
-    const processTrade = (msgId: string, buyerId: string) => {
-        // Logic trade (giữ nguyên logic mem nhưng cần sync sau này)
-    };
+    const processTrade = (msgId: string, buyerId: string) => { };
 
     const sendReward = (teacherId: string, studentId: string, type: 'diamond' | 'item', value: number | string, message: string) => {
         const rewardData = { type, value, message };
         sendChatMessage(teacherId, studentId, message, undefined, undefined, undefined, undefined, rewardData);
     };
 
-    const createFlashcardDeck = (title: string, cards: Flashcard[]) => {
-        setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [`fd_${Date.now()}`]: { id: `fd_${Date.now()}`, title, cards } } }));
-    };
+    const createFlashcardDeck = (title: string, cards: Flashcard[]) => { setDb(prev => ({ ...prev, FLASHCARD_DECKS: { ...prev.FLASHCARD_DECKS, [`fd_${Date.now()}`]: { id: `fd_${Date.now()}`, title, cards } } })); };
     const addFlashcardToDeck = (deckId: string, cards: Flashcard[]) => {
         setDb(prev => {
             const deck = prev.FLASHCARD_DECKS[deckId];
@@ -792,38 +671,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }));
     };
 
-    const updateScratchpad = (userId: string, content: string) => { 
-        setDb(prev => ({ ...prev, SCRATCHPAD: { ...prev.SCRATCHPAD, [userId]: content } })); 
-    };
+    const updateScratchpad = (userId: string, content: string) => { setDb(prev => ({ ...prev, SCRATCHPAD: { ...prev.SCRATCHPAD, [userId]: content } })); };
 
     // --- NOTEBOOK SYNC ---
     const createPersonalNote = async (userId: string, title: string, content: string, links?: any) => {
         try {
-            const res = await fetch(`${BACKEND_URL}/notes`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId, title, content, linkedAssignmentId: links?.assignmentId, linkedPathId: links?.pathId })
-            });
+            const res = await fetch(`${BACKEND_URL}/notes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, title, content, linkedAssignmentId: links?.assignmentId, linkedPathId: links?.pathId }) });
             const newNote = await res.json();
-            setDb(prev => ({ 
-                ...prev, 
-                PERSONAL_NOTES: { ...prev.PERSONAL_NOTES, [newNote._id]: { ...newNote, id: newNote._id } } 
-            }));
+            setDb(prev => ({ ...prev, PERSONAL_NOTES: { ...prev.PERSONAL_NOTES, [newNote._id]: { ...newNote, id: newNote._id } } }));
         } catch (e) { console.error(e); }
     };
 
     const updatePersonalNote = async (noteId: string, updates: Partial<PersonalNote>) => {
         try {
-            const res = await fetch(`${BACKEND_URL}/notes/${noteId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
+            const res = await fetch(`${BACKEND_URL}/notes/${noteId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
             const updated = await res.json();
-            setDb(prev => ({ 
-                ...prev, 
-                PERSONAL_NOTES: { ...prev.PERSONAL_NOTES, [noteId]: { ...updated, id: updated._id } } 
-            }));
+            setDb(prev => ({ ...prev, PERSONAL_NOTES: { ...prev.PERSONAL_NOTES, [noteId]: { ...updated, id: updated._id } } }));
         } catch (e) { console.error(e); }
     };
 
@@ -839,11 +702,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setDb(prev => ({ ...prev, NODE_NOTES: { ...prev.NODE_NOTES, [key]: { id: key, userId, title: `Node ${nodeId}`, content, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } } }));
     };
 
-    const savePdfToNote = async (noteId: string, file: File) => {
-        const fileId = `pdf_${Date.now()}`;
-        setPdfStorage(prev => ({ ...prev, [fileId]: file }));
-        updatePersonalNote(noteId, { pdfFileId: fileId });
-    };
+    const savePdfToNote = async (noteId: string, file: File) => { const fileId = `pdf_${Date.now()}`; setPdfStorage(prev => ({ ...prev, [fileId]: file })); updatePersonalNote(noteId, { pdfFileId: fileId }); };
     const getPdfForNote = async (fileId: string) => { return pdfStorage[fileId] || null; };
     const removePdfFromNote = (noteId: string) => { updatePersonalNote(noteId, { pdfFileId: undefined }); };
     const shareNoteToSquadron = (noteId: string, groupId: string) => { updatePersonalNote(noteId, { sharedWithSquadronId: groupId }); };
@@ -859,9 +718,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }));
     };
     const addNoteComment = (noteId: string, userId: string, content: string, highlightedText?: string) => {
-        updatePersonalNote(noteId, { 
-            comments: [...(db.PERSONAL_NOTES[noteId]?.comments || []), { id: `c${Date.now()}`, userId, userName: db.USERS[userId]?.name || userId, content, highlightedText, timestamp: new Date().toISOString() } as any] 
-        });
+        updatePersonalNote(noteId, { comments: [...(db.PERSONAL_NOTES[noteId]?.comments || []), { id: `c${Date.now()}`, userId, userName: db.USERS[userId]?.name || userId, content, highlightedText, timestamp: new Date().toISOString() } as any] });
     };
 
     // --- LEARNING PATH ---
@@ -870,81 +727,35 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const id = `lp_${Date.now()}`;
         const deadline = new Date(); deadline.setDate(deadline.getDate() + 7);
         const newPath: LearningPath = { 
-            id, creatorId: userId, title, topic, createdAt: new Date().toISOString(), 
-            nodes, targetLevel: meta.level, goal: meta.goal, dailyCommitment: meta.time, 
+            id, creatorId: userId, title, topic, createdAt: new Date().toISOString(), nodes, targetLevel: meta.level, goal: meta.goal, dailyCommitment: meta.time, 
             wager: wagerAmount ? { amount: wagerAmount, deadline: deadline.toISOString(), isResolved: false } : undefined 
         };
-        
         try {
-            const res = await fetch(`${BACKEND_URL}/paths`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newPath)
-            });
-
-            if (!res.ok) {
-                const errorData = await res.json();
-                throw new Error(errorData.message || "Failed to save path to server");
-            }
-
+            const res = await fetch(`${BACKEND_URL}/paths`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPath) });
+            if (!res.ok) throw new Error("Failed to save path");
             setDb(prev => {
                 let newGamification = prev.GAMIFICATION;
                 if (wagerAmount) { newGamification = { ...prev.GAMIFICATION, diamonds: prev.GAMIFICATION.diamonds - wagerAmount }; }
                 return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [id]: newPath }, GAMIFICATION: newGamification };
             });
-
             return id;
-        } catch (e: any) {
-            console.error("Failed to sync path creation:", e);
-            throw e;
-        }
+        } catch (e: any) { console.error(e); throw e; }
     };
 
-    // --- UPDATED ASSIGN LEARNING PATH: ASYNC & AWAIT ---
     const assignLearningPath = async (teacherName: string, studentIds: string[], pathData: any) => {
         const newPaths: Record<string, LearningPath> = { ...db.LEARNING_PATHS };
         const newNotifs: Record<string, Notification[]> = { ...db.NOTIFICATIONS };
-
-        // Use Promise.all to ensure all backend requests complete
         const promises = studentIds.map(async (studentId) => {
             const id = `lp_${Date.now()}_${studentId}`;
             const assignedPath = { ...pathData, id, creatorId: studentId, createdAt: new Date().toISOString() };
-            
-            // Optimistic update objects (Note: mutating newPaths locally is safe here before setDb)
             newPaths[id] = assignedPath;
-            
-            const notif: Notification = { 
-                id: `n_assign_${Date.now()}_${studentId}`, 
-                text: `👨‍🏫 Giáo viên ${teacherName} đã giao lộ trình học tập mới: "${pathData.title}"`, 
-                read: false, 
-                type: 'system', 
-                timestamp: new Date().toISOString() 
-            };
-            
-            // Handle array immutability for notifications
+            const notif: Notification = { id: `n_assign_${Date.now()}_${studentId}`, text: `👨‍🏫 Giáo viên ${teacherName} đã giao lộ trình học tập mới: "${pathData.title}"`, read: false, type: 'system', timestamp: new Date().toISOString() };
             const currentNotifs = newNotifs[studentId] || [];
             newNotifs[studentId] = [notif, ...currentNotifs];
-
-            // Backend Sync
-            try {
-                await fetch(`${BACKEND_URL}/paths`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(assignedPath)
-                });
-            } catch (e) {
-                console.error(`Failed to assign path to ${studentId}:`, e);
-                // Optionally handle error (e.g. revert optimistic update), but keeping simple for now
-            }
+            try { await fetch(`${BACKEND_URL}/paths`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(assignedPath) }); } catch (e) { console.error(`Failed to assign path to ${studentId}:`, e); }
         });
-
         await Promise.all(promises);
-
-        setDb(prev => ({ 
-            ...prev, 
-            LEARNING_PATHS: newPaths, 
-            NOTIFICATIONS: newNotifs 
-        }));
+        setDb(prev => ({ ...prev, LEARNING_PATHS: newPaths, NOTIFICATIONS: newNotifs }));
     };
 
     const updateNodeProgress = (pathId: string, nodeId: string, data: Partial<LearningNode>) => {
@@ -953,14 +764,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (!path) return prev;
             const newNodes = path.nodes.map(n => n.id === nodeId ? { ...n, ...data } : n);
             const updatedPath = { ...path, nodes: newNodes };
-            
-            // Backend Sync
-            fetch(`${BACKEND_URL}/paths/${pathId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedPath)
-            });
-
+            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
             return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
@@ -970,31 +774,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const path = prev.LEARNING_PATHS[pathId];
             if (!path) return prev;
             const index = path.nodes.findIndex(n => n.id === nodeId);
-            if (index >= 0 && index < path.nodes.length - 1) {
-                const newNodes = [...path.nodes];
-                newNodes[index] = { ...newNodes[index], isCompleted: true };
-                newNodes[index + 1] = { ...newNodes[index + 1], isLocked: false };
-                const updatedPath = { ...path, nodes: newNodes };
-                
-                // Backend Sync
-                fetch(`${BACKEND_URL}/paths/${pathId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updatedPath)
-                });
-
-                return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
-            }
             const newNodes = [...path.nodes];
             newNodes[index] = { ...newNodes[index], isCompleted: true };
+            if (index < path.nodes.length - 1) newNodes[index + 1] = { ...newNodes[index + 1], isLocked: false };
             const updatedPath = { ...path, nodes: newNodes };
-            
-            fetch(`${BACKEND_URL}/paths/${pathId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedPath)
-            });
-
+            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
             return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
@@ -1004,13 +788,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const path = prev.LEARNING_PATHS[pathId];
             if (!path) return prev;
             const updatedPath = { ...path, nodes: [...path.nodes, ...newNodes] };
-            
-            fetch(`${BACKEND_URL}/paths/${pathId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedPath)
-            });
-
+            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
             return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
@@ -1021,13 +799,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (!path) return prev;
             const newNodes = path.nodes.map(n => ({ ...n, isLocked: false, isCompleted: true }));
             const updatedPath = { ...path, nodes: newNodes };
-
-            fetch(`${BACKEND_URL}/paths/${pathId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedPath)
-            });
-
+            fetch(`${BACKEND_URL}/paths/${pathId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedPath) });
             return { ...prev, LEARNING_PATHS: { ...prev.LEARNING_PATHS, [pathId]: updatedPath } };
         });
     };
@@ -1035,109 +807,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // --- TASK SYNC ---
     const addTask = async (userId: string, text: string) => {
         try {
-            const res = await fetch(`${BACKEND_URL}/tasks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId, text })
-            });
+            const res = await fetch(`${BACKEND_URL}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, text }) });
             const newTask = await res.json();
-            setDb(prev => ({ 
-                ...prev, 
-                TASKS: { ...prev.TASKS, [newTask._id]: { ...newTask, id: newTask._id } } 
-            }));
+            setDb(prev => ({ ...prev, TASKS: { ...prev.TASKS, [newTask._id]: { ...newTask, id: newTask._id } } }));
         } catch (e) { console.error(e); }
     };
 
-    // --- NEW: Toggle Task Completion (Updates Backend & Local) ---
     const toggleTaskCompletion = async (taskId: string, isCompleted: boolean) => {
-        // 1. Optimistic UI Update
-        setDb(prev => ({
-            ...prev,
-            TASKS: {
-                ...prev.TASKS,
-                [taskId]: {
-                    ...prev.TASKS[taskId],
-                    isCompleted,
-                    completedAt: isCompleted ? new Date().toISOString() : undefined
-                }
-            }
-        }));
-
-        // 2. Persist to Backend
-        try {
-            await fetch(`${BACKEND_URL}/tasks/${taskId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    isCompleted,
-                    completedAt: isCompleted ? new Date().toISOString() : null
-                })
-            });
-        } catch (e) {
-            console.error("Failed to update task status:", e);
-            // Optionally revert UI here on error
-        }
+        setDb(prev => ({ ...prev, TASKS: { ...prev.TASKS, [taskId]: { ...prev.TASKS[taskId], isCompleted, completedAt: isCompleted ? new Date().toISOString() : undefined } } }));
+        try { await fetch(`${BACKEND_URL}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isCompleted, completedAt: isCompleted ? new Date().toISOString() : null }) }); } catch (e) { console.error(e); }
     };
 
     const deleteTask = async (taskId: string) => {
-        try {
-            await fetch(`${BACKEND_URL}/tasks/${taskId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ isArchived: true })
-            });
+        try { await fetch(`${BACKEND_URL}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isArchived: true }) });
             setDb(prev => { const newTasks = { ...prev.TASKS }; delete newTasks[taskId]; return { ...prev, TASKS: newTasks }; });
         } catch (e) { console.error(e); }
     };
 
-    // --- UPDATED: Archive Completed Tasks (Sync to Backend) ---
     const archiveCompletedTasks = async (userId: string) => {
-        // Find tasks to archive locally
-        // Cast to Task[] to avoid TS errors
         const tasksToArchive = (Object.values(db.TASKS) as Task[]).filter(t => t.userId === userId && t.isCompleted && !t.isArchived);
-        
-        // 1. Optimistic UI Update (Remove from active view locally)
-        setDb(prev => {
-            const newTasks = { ...prev.TASKS };
-            tasksToArchive.forEach(t => {
-                if (newTasks[t.id]) newTasks[t.id].isArchived = true;
-            });
-            return { ...prev, TASKS: newTasks };
-        });
-
-        // 2. Persist to Backend (Loop or Bulk)
-        try {
-            // Simple loop for now since we don't have a bulk endpoint defined yet
-            await Promise.all(tasksToArchive.map(t => 
-                fetch(`${BACKEND_URL}/tasks/${t.id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ isArchived: true })
-                })
-            ));
-        } catch (e) {
-            console.error("Failed to archive tasks:", e);
-        }
+        setDb(prev => { const newTasks = { ...prev.TASKS }; tasksToArchive.forEach(t => { if (newTasks[t.id]) newTasks[t.id].isArchived = true; }); return { ...prev, TASKS: newTasks }; });
+        try { await Promise.all(tasksToArchive.map(t => fetch(`${BACKEND_URL}/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isArchived: true }) }))); } catch (e) { console.error(e); }
     };
 
-    // --- ASSIGNMENT & QUIZ CREATION (WITH PERSISTENCE) ---
     const createFileAssignment = (title: string, courseId: string) => {
         const id = `ass_file_${Date.now()}`;
         const newAssignment: Assignment = { id, courseId, title, type: 'file', createdAt: new Date().toISOString() };
-        
-        // Optimistic Update
-        setDb(prev => ({
-            ...prev,
-            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment },
-            FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] }
-        }));
-
-        // Persist
-        fetch(`${BACKEND_URL}/assignments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newAssignment)
-        });
+        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment }, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] } }));
+        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignment) });
     };
 
     const createQuizAssignment = (title: string, courseId: string, questions: QuizQuestion[]) => {
@@ -1145,45 +842,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const quizId = `qz_${Date.now()}`;
         const newAssignment: Assignment = { id: assignId, courseId, title, type: 'quiz', quizId, createdAt: new Date().toISOString() };
         const newQuiz = { id: quizId, questions, title };
-
-        // Optimistic Update
-        setDb(prev => ({
-            ...prev,
-            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [assignId]: newAssignment },
-            QUIZZES: { ...prev.QUIZZES, [quizId]: newQuiz },
-            QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: {} }
-        }));
-
-        // Persist Assignment
-        fetch(`${BACKEND_URL}/assignments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newAssignment)
-        });
-
-        // Persist Quiz
-        fetch(`${BACKEND_URL}/quizzes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newQuiz)
-        });
+        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [assignId]: newAssignment }, QUIZZES: { ...prev.QUIZZES, [quizId]: newQuiz }, QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [quizId]: {} } }));
+        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignment) });
+        fetch(`${BACKEND_URL}/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newQuiz) });
     };
 
     const createBossChallenge = (courseId: string, title: string, description: string, xp: number) => {
         const id = `ass_boss_${Date.now()}`;
         const newAssignment: Assignment = { id, courseId, title, type: 'file', createdAt: new Date().toISOString(), rank: 'S', isBoss: true, rewardXP: xp, description: description };
-        
-        setDb(prev => ({
-            ...prev,
-            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment },
-            FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] }
-        }));
-
-        fetch(`${BACKEND_URL}/assignments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newAssignment)
-        });
+        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [id]: newAssignment }, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [id]: [] } }));
+        fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAssignment) });
     };
 
     const sendIntervention = (assignmentId: string, questionId: string, note: string, studentIds: string[]) => {
@@ -1197,106 +865,33 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
     
-    // --- ADMIN CREATE COURSE WITH PERSISTENCE ---
     const adminCreateCourse = async (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => {
         const courseId = `CS_${Date.now()}`;
         const mappedModules = [];
-
         try {
-            // Loop through generated modules
             for (const mod of modules) {
                 const modId = `m_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
                 const items = [];
-
                 for (const item of mod.items) {
                     const itemId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                    
                     if (item.type.includes('lesson')) {
-                        // Create Lesson Content
-                        const lessonData = {
-                            id: itemId,
-                            courseId: courseId,
-                            title: item.title,
-                            type: (item.type === 'lesson_video' ? 'video' : 'text') as 'video' | 'text',
-                            content: item.contentOrDescription
-                        };
-                        
-                        await fetch(`${BACKEND_URL}/lessons`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(lessonData)
-                        });
-
+                        const lessonData = { id: itemId, courseId: courseId, title: item.title, type: (item.type === 'lesson_video' ? 'video' : 'text') as 'video' | 'text', content: item.contentOrDescription };
+                        await fetch(`${BACKEND_URL}/lessons`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lessonData) });
                         items.push({ type: 'lesson', id: itemId });
-                        
-                        // Local State Update for Lesson (Optimistic/Immediate)
-                        setDb(prev => ({
-                            ...prev,
-                            LESSONS: { ...prev.LESSONS, [itemId]: lessonData }
-                        }));
-
+                        setDb(prev => ({ ...prev, LESSONS: { ...prev.LESSONS, [itemId]: lessonData } }));
                     } else {
-                        // Create Assignment
-                        const assignmentData = {
-                            id: itemId,
-                            courseId: courseId,
-                            title: item.title,
-                            type: (item.type === 'assignment_quiz' ? 'quiz' : 'file') as 'file' | 'quiz',
-                            description: item.contentOrDescription,
-                            createdAt: new Date().toISOString()
-                        };
-
-                        await fetch(`${BACKEND_URL}/assignments`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(assignmentData)
-                        });
-
+                        const assignmentData = { id: itemId, courseId: courseId, title: item.title, type: (item.type === 'assignment_quiz' ? 'quiz' : 'file') as 'file' | 'quiz', description: item.contentOrDescription, createdAt: new Date().toISOString() };
+                        await fetch(`${BACKEND_URL}/assignments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(assignmentData) });
                         items.push({ type: 'assignment', id: itemId });
-
-                        // Local State Update for Assignment
-                        setDb(prev => ({
-                            ...prev,
-                            ASSIGNMENTS: { ...prev.ASSIGNMENTS, [itemId]: assignmentData },
-                            // Initialize submissions
-                            FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [itemId]: [] },
-                            // Initialize quiz if quiz
-                            ...(item.type === 'assignment_quiz' ? {
-                                QUIZZES: { ...prev.QUIZZES, [itemId]: { id: `qz_${itemId}`, title: item.title, questions: [] } },
-                                QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [`qz_${itemId}`]: {} }
-                            } : {})
-                        }));
+                        setDb(prev => ({ ...prev, ASSIGNMENTS: { ...prev.ASSIGNMENTS, [itemId]: assignmentData }, FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [itemId]: [] }, ...(item.type === 'assignment_quiz' ? { QUIZZES: { ...prev.QUIZZES, [itemId]: { id: `qz_${itemId}`, title: item.title, questions: [] } }, QUIZ_SUBMISSIONS: { ...prev.QUIZ_SUBMISSIONS, [`qz_${itemId}`]: {} } } : {}) }));
                     }
                 }
                 mappedModules.push({ id: modId, name: mod.title, items });
             }
-
-            // Create Course Document
-            const courseData = {
-                id: courseId,
-                name: name,
-                teacher: teacherName,
-                defaultPersona: defaultPersona,
-                modules: mappedModules
-            };
-
-            await fetch(`${BACKEND_URL}/courses`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(courseData)
-            });
-
-            // Update Local State for Course & Structure
-            setDb(prev => ({
-                ...prev,
-                COURSES: [...prev.COURSES, { id: courseId, name, teacher: teacherName, defaultPersona }],
-                COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules: mappedModules } }
-            }));
-
-        } catch (error) {
-            console.error("Error creating course:", error);
-            throw error;
-        }
+            const courseData = { id: courseId, name: name, teacher: teacherName, defaultPersona, modules: mappedModules };
+            await fetch(`${BACKEND_URL}/courses`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(courseData) });
+            setDb(prev => ({ ...prev, COURSES: [...prev.COURSES, { id: courseId, name, teacher: teacherName, defaultPersona }], COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules: mappedModules } } }));
+        } catch (error) { console.error("Error creating course:", error); throw error; }
     };
 
     const generateArchive = async (apiKey: string, type: 'course'|'squadron', id: string, name: string): Promise<string> => {
@@ -1304,9 +899,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (type === 'course') { const course = db.COURSES.find(c => c.id === id); data = { course, structure: db.COURSE_STRUCTURE[id] }; } else { const group = db.STUDY_GROUPS.find(g => g.id === id); data = { group, messages: db.GROUP_CHAT_MESSAGES[id] }; }
         return await generateLegacyArchiveContent(apiKey, data, type, name);
     };
-    const addCommunityQuestion = (userId: string, nodeId: string, question: QuizQuestion) => {
-        setDb(prev => ({ ...prev, COMMUNITY_QUESTIONS: [...prev.COMMUNITY_QUESTIONS, { ...question, authorId: userId, nodeId }] }));
-    };
+    const addCommunityQuestion = (userId: string, nodeId: string, question: QuizQuestion) => { setDb(prev => ({ ...prev, COMMUNITY_QUESTIONS: [...prev.COMMUNITY_QUESTIONS, { ...question, authorId: userId, nodeId }] })); };
     const addLessonToCourse = (courseId: string, title: string, content: string) => {
         setDb(prev => {
             const newLessonId = `l_note_${Date.now()}`;
@@ -1322,12 +915,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { ...prev, LESSONS: { ...prev.LESSONS, [newLessonId]: newLesson }, COURSE_STRUCTURE: { ...prev.COURSE_STRUCTURE, [courseId]: { modules: newModules } } };
         });
     };
-    const editLessonContent = (lessonId: string, newContent: string) => {
-        setDb(prev => ({ ...prev, LESSONS: { ...prev.LESSONS, [lessonId]: { ...prev.LESSONS[lessonId], content: newContent } } }));
-    };
-    const updateCourseSettings = (courseId: string, settings: Partial<Course>) => {
-        setDb(prev => ({ ...prev, COURSES: prev.COURSES.map(c => c.id === courseId ? { ...c, ...settings } : c) }));
-    };
+    const editLessonContent = (lessonId: string, newContent: string) => { setDb(prev => ({ ...prev, LESSONS: { ...prev.LESSONS, [lessonId]: { ...prev.LESSONS[lessonId], content: newContent } } })); };
+    const updateCourseSettings = (courseId: string, settings: Partial<Course>) => { setDb(prev => ({ ...prev, COURSES: prev.COURSES.map(c => c.id === courseId ? { ...c, ...settings } : c) })); };
 
     return (
         <DataContext.Provider value={{
@@ -1353,9 +942,7 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({ childre
         user_management: 'OPERATIONAL', course_management: 'OPERATIONAL', content_delivery: 'OPERATIONAL', assessment_taking: 'OPERATIONAL', storage_service: 'OPERATIONAL', grading_service: 'OPERATIONAL', notification_service: 'OPERATIONAL', chat_service: 'OPERATIONAL', group_service: 'OPERATIONAL', forum_service: 'OPERATIONAL', ai_tutor_service: 'OPERATIONAL', ai_assistant_service: 'OPERATIONAL', personalization: 'OPERATIONAL', analytics: 'OPERATIONAL'
     });
     const [featureFlags, setFeatureFlags] = useState<Record<string, FeatureFlag>>({});
-    const [pomodoro, setPomodoro] = useState<{ isActive: boolean; seconds: number; mode: 'focus' | 'break' }>({
-        isActive: false, seconds: 25 * 60, mode: 'focus'
-    });
+    const [pomodoro, setPomodoro] = useState<{ isActive: boolean; seconds: number; mode: 'focus' | 'break' }>({ isActive: false, seconds: 25 * 60, mode: 'focus' });
     const [deepWorkMode, setDeepWorkMode] = useState(false);
     const [page, setPageInternal] = useState('dashboard');
     const [pageParams, setPageParams] = useState<any>(null);
@@ -1369,14 +956,8 @@ export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({ childre
         });
     };
 
-    const setFeatureFlag = (key: string, status: any, specificUsers: string = '') => {
-        setFeatureFlags(prev => ({ ...prev, [key]: { status, specificUsers } }));
-    };
-
-    const setPage = (newPage: string, params?: any) => {
-        setPageInternal(newPage);
-        setPageParams(params || null);
-    };
+    const setFeatureFlag = (key: string, status: any, specificUsers: string = '') => { setFeatureFlags(prev => ({ ...prev, [key]: { status, specificUsers } })); };
+    const setPage = (newPage: string, params?: any) => { setPageInternal(newPage); setPageParams(params || null); };
 
     return (
         <GlobalStateContext.Provider value={{
@@ -1409,65 +990,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const login = async (u: string, p: string) => {
         try {
-            const response = await fetch(`${BACKEND_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: u, password: p }),
-            });
-
+            const response = await fetch(`${BACKEND_URL}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: u, password: p }), });
             const data = await response.json();
-
             if (response.ok) {
-                const loggedUser: User = {
-                    id: data.id,
-                    name: data.name,
-                    role: data.role,
-                    isLocked: data.isLocked || false,
-                    apiKey: null,
-                    hasSeenOnboarding: data.hasSeenOnboarding || false,
-                    squadronId: data.squadronId
-                };
+                const loggedUser: User = { id: data.id, name: data.name, role: data.role, isLocked: data.isLocked || false, apiKey: null, hasSeenOnboarding: data.hasSeenOnboarding || false, squadronId: data.squadronId };
                 setUser(loggedUser);
                 setError(null);
-                
-                // --- CRITICAL: Manually inject user into DB state immediately ---
-                // This fixes the white screen issue by ensuring db.USERS[user.id] exists before React renders dashboard widgets
                 syncUserToDb(loggedUser);
-
-                // Fire async fetch for full profile (notes, etc.)
-                // No await here! Fire and forget to make UI responsive immediately
                 fetchUserData(loggedUser.id);
-                
                 navigate('dashboard');
-            } else {
-                setError(data.message || "Login failed");
-            }
-        } catch (err) {
-            console.error("Login API Error:", err);
-            setError("Cannot connect to server. Ensure BACKEND_URL is set correctly.");
-        }
+            } else { setError(data.message || "Login failed"); }
+        } catch (err) { console.error("Login API Error:", err); setError("Cannot connect to server."); }
     };
 
     const logout = () => { setUser(null); navigate('dashboard'); };
     const isLocked = user?.isLocked || false;
 
-    // --- HEARTBEAT LOOP ---
-    // Sends a pulse to the server every 30s if user is logged in
     useEffect(() => {
         if (!user) return;
-
-        const heartbeat = () => {
-            fetch(`${BACKEND_URL}/users/heartbeat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: user.id })
-            }).catch(e => console.error("Heartbeat failed", e));
-        };
-
-        // Initial call
+        const heartbeat = () => { fetch(`${BACKEND_URL}/users/heartbeat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.id }) }).catch(e => console.error("Heartbeat failed", e)); };
         heartbeat();
-
-        const interval = setInterval(heartbeat, 30000); // 30 seconds
+        const interval = setInterval(heartbeat, 30000);
         return () => clearInterval(interval);
     }, [user]);
 
@@ -1478,47 +1021,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
 };
 
-// ... MusicProvider & PetProvider giữ nguyên ...
-
 export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [currentTrack, setCurrentTrack] = useState<{ name: string, url: string, tempo?: 'slow' | 'medium' | 'fast' } | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    useEffect(() => {
-        if (!audioRef.current) {
-            audioRef.current = new Audio();
-        }
-    }, []);
-
+    useEffect(() => { if (!audioRef.current) { audioRef.current = new Audio(); } }, []);
     useEffect(() => {
         if (audioRef.current) {
             if (currentTrack) {
-                if (audioRef.current.src !== currentTrack.url) {
-                    audioRef.current.src = currentTrack.url;
-                    if (isPlaying) audioRef.current.play();
-                } else {
-                    if (isPlaying) audioRef.current.play();
-                    else audioRef.current.pause();
-                }
-            } else {
-                audioRef.current.pause();
-            }
+                if (audioRef.current.src !== currentTrack.url) { audioRef.current.src = currentTrack.url; if (isPlaying) audioRef.current.play(); } else { if (isPlaying) audioRef.current.play(); else audioRef.current.pause(); }
+            } else { audioRef.current.pause(); }
         }
     }, [currentTrack, isPlaying]);
 
-    const playTrack = (track: { name: string, url: string, tempo?: 'slow' | 'medium' | 'fast' }) => {
-        if (currentTrack?.name === track.name) {
-            setIsPlaying(!isPlaying);
-        } else {
-            setCurrentTrack(track);
-            setIsPlaying(true);
-        }
-    };
-
-    const togglePlay = () => {
-        if (currentTrack) setIsPlaying(!isPlaying);
-    };
+    const playTrack = (track: { name: string, url: string, tempo?: 'slow' | 'medium' | 'fast' }) => { if (currentTrack?.name === track.name) { setIsPlaying(!isPlaying); } else { setCurrentTrack(track); setIsPlaying(true); } };
+    const togglePlay = () => { if (currentTrack) setIsPlaying(!isPlaying); };
 
     return (
         <MusicContext.Provider value={{ currentTrack, isPlaying, playTrack, togglePlay }}>
@@ -1531,27 +1049,19 @@ export const PetProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [currentReaction, setCurrentReaction] = useState('idle');
     const [petDialogue, setPetDialogue] = useState<string | null>(null);
     const [petPosition, setPetPosition] = useState<React.CSSProperties | null>(null);
-    
     const timeoutRef = useRef<number | null>(null);
     const dialogueTimeoutRef = useRef<number | null>(null);
 
     const triggerReaction = (reaction: string) => {
         setCurrentReaction(reaction);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        
-        if (reaction !== 'sleep' && !reaction.startsWith('hover_')) {
-             timeoutRef.current = window.setTimeout(() => {
-                setCurrentReaction('idle');
-            }, 3000);
-        }
+        if (reaction !== 'sleep' && !reaction.startsWith('hover_')) { timeoutRef.current = window.setTimeout(() => { setCurrentReaction('idle'); }, 3000); }
     };
 
     const say = (text: string, duration: number = 5000) => {
         setPetDialogue(text);
         if (dialogueTimeoutRef.current) clearTimeout(dialogueTimeoutRef.current);
-        dialogueTimeoutRef.current = window.setTimeout(() => {
-            setPetDialogue(null);
-        }, duration);
+        dialogueTimeoutRef.current = window.setTimeout(() => { setPetDialogue(null); }, duration);
     };
 
     return (

@@ -133,7 +133,7 @@ const LessonContent: React.FC<LessonContentProps> = ({ content, type, isTeacher,
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-10 rounded-lg animate-fade-in">
                             <LoadingSpinner size={8} />
                             <p className="mt-4 text-orange-300 font-bold animate-pulse">AI đang đọc truyện cho bạn...</p>
-                            <p className="text-xs text-gray-500">Gemini 3 Pro Thinking Mode</p>
+                            <p className="text-xs text-gray-500">Gemini 2.5 Flash Thinking Mode</p>
                         </div>
                     )}
                     
@@ -148,7 +148,7 @@ const LessonContent: React.FC<LessonContentProps> = ({ content, type, isTeacher,
                     
                     {isSimpleMode && (
                         <div className="mt-8 pt-4 border-t border-orange-500/30 text-center">
-                            <p className="text-xs text-orange-400 italic">✨ Nội dung được đơn giản hóa bởi AI (Gemini 3 Pro).</p>
+                            <p className="text-xs text-orange-400 italic">✨ Nội dung được đơn giản hóa bởi AI (Gemini 2.5 Flash).</p>
                         </div>
                     )}
                 </div>

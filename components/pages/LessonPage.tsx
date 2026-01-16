@@ -29,33 +29,23 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
         (db.VIDEO_NOTES && db.VIDEO_NOTES[lessonId] ? db.VIDEO_NOTES[lessonId].filter(n => n.userId === user?.id) : []), 
     [db.VIDEO_NOTES, lessonId, user?.id]);
 
-    // State for Player
     const [currentTime, setCurrentTime] = useState(0);
-    // Using HTMLIFrameElement for raw iframe control
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
 
-    // --- QUICK NOTE STATE ---
     const [isQuickNoteOpen, setIsQuickNoteOpen] = useState(false);
     const [quickNoteContent, setQuickNoteContent] = useState('');
     const [quickNoteTitle, setQuickNoteTitle] = useState('');
 
-    // --- QUICK TEST STATE ---
     const [isQuickTestOpen, setIsQuickTestOpen] = useState(false);
     const [isGeneratingTest, setIsGeneratingTest] = useState(false);
     const [quickTestQuestions, setQuickTestQuestions] = useState<QuizQuestion[]>([]);
 
-    // --- HARVEST RITUAL STATE ---
     const [isHarvestModalOpen, setIsHarvestModalOpen] = useState(false);
 
-    // --- CONFUSION DETECTION STATE ---
     const [showRescueBubble, setShowRescueBubble] = useState(false);
     
-    // --- ONBOARDING TOUR STATE ---
     const [isTourOpen, setIsTourOpen] = useState(false);
-
-    // Note: With raw iframe, precise 'onProgress' for confusion detection is limited without heavy API boilerplate.
-    // We retain the UI logic but it won't auto-trigger based on seek/rewind in this 'Safe Mode' implementation.
 
     const isContentServiceOk = serviceStatus.content_delivery === 'OPERATIONAL';
     const isForumServiceOk = serviceStatus.forum_service === 'OPERATIONAL';
@@ -63,7 +53,6 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
 
     const isCompleted = useMemo(() => user ? db.LESSON_PROGRESS?.[user.id]?.includes(lessonId) : false, [db.LESSON_PROGRESS, user, lessonId]);
 
-    // --- EFFECT: Keyboard Shortcut for Quick Note ---
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement;
@@ -79,12 +68,10 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [lesson]);
 
-    // --- EFFECT: Check Onboarding ---
     useEffect(() => {
         if (lesson?.type === 'video') {
             const hasSeenVideoTour = localStorage.getItem('hasSeenVideoTour');
             if (!hasSeenVideoTour) {
-                // Short delay to ensure rendering
                 setTimeout(() => setIsTourOpen(true), 1500);
             }
         }
@@ -146,7 +133,6 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
         setShowRescueBubble(false);
         const timestamp = new Date(currentTime * 1000).toISOString().substr(11, 8);
         
-        // Use Persona Binding from Course, fallback to Guardian
         const autoPersona = course?.defaultPersona || 'guardian';
 
         navigate('gemini_student', { 
@@ -156,7 +142,6 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
         });
     };
 
-    // --- QUICK TEST HANDLER ---
     const handleQuickTest = async () => {
         if (!lesson || !user) return;
         
@@ -185,21 +170,18 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
         }
     };
 
-    // --- HANDLERS ---
     const handleSeekTo = useCallback((seconds: number) => {
         if (iframeRef.current && iframeRef.current.contentWindow) {
-            // Send YouTube IFrame API command to seek
             iframeRef.current.contentWindow.postMessage(JSON.stringify({
                 event: 'command',
                 func: 'seekTo',
                 args: [seconds, true]
             }), '*');
-            setCurrentTime(seconds); // Optimistically update UI
+            setCurrentTime(seconds); 
         }
     }, []);
 
     const handleInputFocus = useCallback(() => {
-        // Optional: pause video on typing note
     }, []);
 
     const handleAddNote = useCallback((text: string) => {
@@ -227,18 +209,15 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
             alert("Bạn đã hoàn thành bài học này rồi.");
             return;
         }
-        // Open Harvest Modal
         setIsHarvestModalOpen(true);
     };
 
     const handleHarvest = (content: string) => {
         if (!user || !lesson) return;
         
-        // Check if first lesson (progress empty)
         const currentProgress = db.LESSON_PROGRESS[user.id] || [];
         const isFirstLesson = currentProgress.length === 0;
 
-        // 1. Create Note
         createPersonalNote(
             user.id, 
             `Key Takeaway: ${lesson.title}`, 
@@ -246,15 +225,11 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
             { lessonId: lesson.id, tags: ['#KeyTakeaways'] }
         );
 
-        // 2. Mark Complete
         markLessonComplete(user.id, lesson.id);
-        
-        // 3. Award XP
         awardXP(50);
 
         setIsHarvestModalOpen(false);
         
-        // FLOW: Economy Intro
         if (isFirstLesson) {
             triggerReaction('hover_coin');
             say("Woah! Cậu vừa kiếm được XP đầu tiên! Tích đủ kim cương thì ghé Cửa Hàng mua áo mới cho tớ nhé!", 8000);
@@ -324,12 +299,10 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
             </div>
 
             <div className={`grid grid-cols-1 gap-8 ${isVideo ? 'lg:grid-cols-3' : ''}`}>
-                {/* --- Main Content Area --- */}
                 <div className={`${isVideo ? 'lg:col-span-2' : 'w-full'} space-y-6`}>
                      <div id="video-player-container" className="card p-0 overflow-hidden bg-black border border-gray-700 shadow-2xl relative">
                         {isVideo ? (
                             <div className="relative w-full" style={{ paddingTop: '56.25%' }}>
-                                {/* RAW IFRAME IMPLEMENTATION TO FIX ERROR 153 */}
                                 <iframe
                                     ref={iframeRef}
                                     src={`${lesson.content}${lesson.content.includes('?') ? '&' : '?'}enablejsapi=1`}
@@ -354,13 +327,12 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
 
                     <LessonDiscussion 
                         posts={discussion}
-                        user={user ? { id: user.id, name: user.name, role: user.role, isLocked: false, apiKey: null } : null}
+                        user={user ? { id: user.id, name: user.name, role: user.role, isLocked: false, apiKey: null, hasSeenOnboarding: true, squadronId: user.squadronId } : null}
                         isServiceOk={isForumServiceOk}
                         onPost={handlePostDiscussion}
                     />
                 </div>
 
-                {/* --- Sidebar (Video Only) --- */}
                 {isVideo && (
                     <div className="lg:col-span-1">
                         <VideoNotesSidebar 
@@ -375,7 +347,6 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
                 )}
             </div>
 
-            {/* --- QUICK NOTE SIDE PANEL --- */}
             {isQuickNoteOpen && (
                 <div 
                     className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm transition-opacity"
@@ -421,7 +392,6 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
                 </div>
             </div>
 
-            {/* --- PET RESCUE BUBBLE --- */}
             {showRescueBubble && (
                 <div className="fixed bottom-36 right-8 z-[70] animate-pop-in">
                     <div className="relative bg-white text-gray-900 p-4 rounded-2xl rounded-br-none shadow-[0_0_30px_rgba(37,99,235,0.5)] border-2 border-blue-500 max-w-xs">
@@ -455,24 +425,21 @@ const LessonPage: React.FC<LessonPageProps> = ({ lessonId }) => {
                 </div>
             )}
 
-            {/* --- QUICK TEST MODAL --- */}
             <QuickTestModal 
                 isOpen={isQuickTestOpen}
                 onClose={() => setIsQuickTestOpen(false)}
                 questions={quickTestQuestions}
             />
 
-            {/* --- HARVEST MODAL --- */}
             <HarvestModal 
                 isOpen={isHarvestModalOpen}
                 onClose={() => setIsHarvestModalOpen(false)}
                 lessonTitle={lesson.title}
-                lessonContent={lesson.type === 'text' ? lesson.content : lesson.title} // Simplified context for video
+                lessonContent={lesson.type === 'text' ? lesson.content : lesson.title} 
                 onHarvest={handleHarvest}
                 onSkip={handleSkipHarvest}
             />
 
-            {/* --- ONBOARDING TOUR --- */}
             <OnboardingTour 
                 steps={videoTourSteps} 
                 isOpen={isTourOpen} 

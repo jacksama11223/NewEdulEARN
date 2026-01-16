@@ -11,9 +11,9 @@ import ChatMessage from '../models/ChatMessage.js';
 import StudyGroup from '../models/StudyGroup.js';
 import GroupMessage from '../models/GroupMessage.js';
 import LearningPath from '../models/LearningPath.js';
-import Quiz from '../models/Quiz.js'; // NEW
-import QuizSubmission from '../models/QuizSubmission.js'; // NEW
-import User from '../models/User.js'; // Need User model for heartbeat
+import Quiz from '../models/Quiz.js';
+import QuizSubmission from '../models/QuizSubmission.js';
+import User from '../models/User.js';
 
 const router = express.Router();
 
@@ -27,7 +27,6 @@ router.post('/users/heartbeat', async (req, res) => {
         const { userId } = req.body;
         if (!userId) return res.status(400).json({ message: "UserId required" });
 
-        // Update lastActiveAt to now
         const user = await User.findOneAndUpdate(
             { id: userId }, 
             { lastActiveAt: new Date() },
@@ -36,12 +35,11 @@ router.post('/users/heartbeat', async (req, res) => {
 
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        // Return the "Online Token" status
         res.json({ 
             status: 'online', 
             serverTime: new Date(), 
             lastActive: user.lastActiveAt,
-            token: "PRESENCE_ACK_ONLINE" // The requested token
+            token: "PRESENCE_ACK_ONLINE"
         });
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -50,8 +48,6 @@ router.post('/users/heartbeat', async (req, res) => {
 
 router.get('/users', async (req, res) => {
     try {
-        // Fetch all users to display contacts list
-        // Mongoose virtual 'isOnline' will be calculated automatically based on lastActiveAt
         const users = await User.find({}).select('-password'); 
         res.json(users);
     } catch (error) {
@@ -74,7 +70,6 @@ router.get('/courses', async (req, res) => {
 router.post('/courses', async (req, res) => {
     try {
         const { id, ...updateData } = req.body;
-        // Upsert course based on ID
         const course = await Course.findOneAndUpdate({ id }, { id, ...updateData }, { new: true, upsert: true });
         res.status(201).json(course);
     } catch (error) { res.status(400).json({ message: error.message }); }
@@ -82,7 +77,6 @@ router.post('/courses', async (req, res) => {
 
 router.get('/lessons', async (req, res) => {
     try {
-        // Fetch all lessons (optimized for this demo structure)
         const lessons = await Lesson.find({});
         res.json(lessons);
     } catch (error) { res.status(500).json({ message: error.message }); }
@@ -102,7 +96,7 @@ router.post('/lessons', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
-// --- ASSIGNMENTS & QUIZZES (UPDATED) ---
+// --- ASSIGNMENTS & QUIZZES ---
 router.get('/assignments', async (req, res) => {
     try {
         const assignments = await Assignment.find({});
@@ -126,7 +120,6 @@ router.get('/quizzes', async (req, res) => {
 
 router.post('/quizzes', async (req, res) => {
     try {
-        // Upsert: Create if not exists, update if exists
         const { id, ...updateData } = req.body;
         const quiz = await Quiz.findOneAndUpdate({ id }, { id, ...updateData }, { new: true, upsert: true });
         res.status(201).json(quiz);
@@ -142,7 +135,6 @@ router.get('/quiz-submissions', async (req, res) => {
 
 router.post('/quiz-submissions', async (req, res) => {
     try {
-        // Replace previous submission if exists for this student+quiz
         const { quizId, studentId } = req.body;
         await QuizSubmission.deleteOne({ quizId, studentId });
         const sub = await QuizSubmission.create(req.body);
@@ -201,7 +193,7 @@ router.put('/tasks/:id', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
-// --- CHAT SYSTEM (1-1) ---
+// --- CHAT SYSTEM (1-1) - REAL-TIME UPDATED ---
 router.get('/chat/history/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
@@ -217,13 +209,22 @@ router.get('/chat/history/:userId', async (req, res) => {
 router.post('/chat/send', async (req, res) => {
     try {
         const newMessage = await ChatMessage.create(req.body);
+        
+        // Broadcast via Socket.IO
+        // Send to the recipient's personal room
+        if (req.io) {
+            req.io.to(newMessage.to).emit('receive_message', newMessage);
+            // Also emit back to sender (useful for multi-device sync)
+            req.io.to(newMessage.from).emit('receive_message', newMessage);
+        }
+
         res.status(201).json(newMessage);
     } catch (error) {
         res.status(400).json({ message: error.message });
     }
 });
 
-// --- GROUP SYSTEM ---
+// --- GROUP SYSTEM - REAL-TIME UPDATED ---
 router.get('/groups', async (req, res) => {
     try {
         const groups = await StudyGroup.find({});
@@ -260,6 +261,12 @@ router.get('/group-chat/all', async (req, res) => {
 router.post('/group-chat/send', async (req, res) => {
     try {
         const message = await GroupMessage.create(req.body);
+        
+        // Broadcast via Socket.IO to the specific Group Room
+        if (req.io) {
+            req.io.to(message.groupId).emit('receive_group_message', message);
+        }
+
         res.status(201).json(message);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -272,6 +279,12 @@ router.put('/group-chat/:msgId/resolve', async (req, res) => {
             { sosStatus: 'RESOLVED', rescuerName },
             { new: true }
         );
+        
+        // Emit update to group so UI updates instantly
+        if (req.io && message) {
+            req.io.to(message.groupId).emit('receive_group_message_update', message);
+        }
+
         res.json(message);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });

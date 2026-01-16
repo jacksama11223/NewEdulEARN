@@ -24,14 +24,14 @@ const insertTextAtCursor = (input: HTMLTextAreaElement, prefix: string, suffix: 
 };
 
 const NotebookPage: React.FC = () => {
-    // Destructure addLessonToCourse
+    // Destructure addLessonToCourse, createFlashcardDeck, addTask
     const { user } = useContext(AuthContext)!;
-    const { db, createPersonalNote, updatePersonalNote, deletePersonalNote, savePdfToNote, getPdfForNote, removePdfFromNote, shareNoteToSquadron, unshareNote, sendChatMessage, addLessonToCourse } = useContext(DataContext)!;
+    const { db, createPersonalNote, updatePersonalNote, deletePersonalNote, savePdfToNote, getPdfForNote, removePdfFromNote, shareNoteToSquadron, unshareNote, sendChatMessage, addLessonToCourse, createFlashcardDeck, addTask } = useContext(DataContext)!;
     const { setPage: setGlobalPage } = useContext(GlobalStateContext)!;
     const { navigate } = useContext(PageContext)!;
-    const { triggerReaction, say } = useContext(PetContext)!; // Added PetContext
+    const { triggerReaction, say } = useContext(PetContext)!;
 
-    // ... existing states (selectedNoteId, searchQuery, etc.) ...
+    // ... existing states ...
     const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [filter, setFilter] = useState<'all' | 'assignment' | 'path'>('all');
@@ -49,7 +49,6 @@ const NotebookPage: React.FC = () => {
     // AI State
     const [isAiProcessing, setIsAiProcessing] = useState(false);
     const [aiResult, setAiResult] = useState<string | null>(null);
-    // UPDATED STATE TYPE for Note Doctor Suggestions
     const [aiConnectionSuggestions, setAiConnectionSuggestions] = useState<{ noteTitle: string, reason: string }[]>([]);
 
     // PDF State
@@ -61,8 +60,6 @@ const NotebookPage: React.FC = () => {
     // Modal State
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const [isFriendShareModalOpen, setIsFriendShareModalOpen] = useState(false);
-    
-    // NEW: Lesson Conversion Modal State
     const [isConvertLessonModalOpen, setIsConvertLessonModalOpen] = useState(false);
     const [selectedCourseForLesson, setSelectedCourseForLesson] = useState<string>('');
     const [isTransformingLesson, setIsTransformingLesson] = useState(false);
@@ -70,16 +67,18 @@ const NotebookPage: React.FC = () => {
     // Autocomplete Link State
     const [showLinkSuggestions, setShowLinkSuggestions] = useState(false);
     const [linkSearchTerm, setLinkSearchTerm] = useState('');
-    const [cursorCoords, setCursorCoords] = useState({ top: 0, left: 0 });
+    
+    // --- NEW: INTERACTIVE TOOLTIP STATE ---
+    const [selectedText, setSelectedText] = useState('');
+    const [tooltipPos, setTooltipPos] = useState<{ top: number, left: number } | null>(null);
 
     // ONBOARDING TOUR STATE
     const [isTourOpen, setIsTourOpen] = useState(false);
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const analysisTimeoutRef = useRef<number | null>(null); // Ref for debounce
+    const analysisTimeoutRef = useRef<number | null>(null);
 
     // Derived Data
-    // ... existing myNotes, mySquadrons, friends logic ...
     const myNotes = useMemo(() => {
         if (!user) return [];
         const notes = (Object.values(db.PERSONAL_NOTES || {}) as PersonalNote[])
@@ -111,10 +110,8 @@ const NotebookPage: React.FC = () => {
             .slice(0, 5); 
     }, [showLinkSuggestions, myNotes, linkSearchTerm, selectedNoteId]);
 
-    // Derived: Teacher Courses for conversion
     const myTeachableCourses = useMemo(() => {
         if (!user || (user.role !== 'TEACHER' && user.role !== 'ADMIN')) return [];
-        // For Teacher: match by name. For Admin: all courses.
         if (user.role === 'ADMIN') return db.COURSES;
         return db.COURSES.filter(c => c.teacher === user.name);
     }, [db.COURSES, user]);
@@ -172,7 +169,6 @@ const NotebookPage: React.FC = () => {
     useEffect(() => {
         const hasSeenTour = localStorage.getItem('hasSeenNotebookTour');
         if (!hasSeenTour) {
-            // Delay slightly
             setTimeout(() => setIsTourOpen(true), 1500);
         }
     }, []);
@@ -197,7 +193,75 @@ const NotebookPage: React.FC = () => {
         }
     ];
 
-    // ... existing handlers (handleCreateNew, handleSave, handleDelete, etc.) ...
+    // --- TEXT SELECTION HANDLER ---
+    const handleTextSelect = () => {
+        const selection = window.getSelection();
+        if (selection && selection.toString().trim().length > 0 && textareaRef.current && textareaRef.current.contains(selection.anchorNode)) {
+            // Get position relative to viewport but clamp to text area
+            // Actually, for textarea, standard selection Rect might be tricky if it's plain text.
+            // But we can approximate using mouseup event coordinates if needed, 
+            // or just center it over the textarea if precise positioning is hard.
+            // Let's use a simple approach: if selection exists, check mouse position from event? 
+            // Better: use the event passed to onMouseUp
+        } else {
+            setTooltipPos(null);
+            setSelectedText('');
+        }
+    };
+
+    const handleMouseUp = (e: React.MouseEvent) => {
+        const selection = window.getSelection();
+        const text = selection?.toString().trim();
+        if (text && text.length > 0 && textareaRef.current?.contains(e.target as Node)) {
+            setSelectedText(text);
+            // Calculate tooltip position near mouse cursor
+            const textAreaRect = textareaRef.current.getBoundingClientRect();
+            // Ensure tooltip is within bounds
+            const top = Math.max(textAreaRect.top, e.clientY - 50);
+            const left = Math.min(textAreaRect.right - 200, Math.max(textAreaRect.left, e.clientX - 100));
+            
+            setTooltipPos({ top, left });
+        } else {
+            setTooltipPos(null);
+            setSelectedText('');
+        }
+    };
+
+    // --- MANUAL ACTION HANDLERS ---
+    const handleManualCreateTask = () => {
+        if (!user || !selectedText) return;
+        addTask(user.id, selectedText);
+        setTooltipPos(null);
+        alert("✅ Đã tạo Task mới!");
+        triggerReaction('note');
+    };
+
+    const handleManualCreateFlashcard = () => {
+        if (!selectedText) return;
+        const deckName = `Inbox Deck (${new Date().toLocaleDateString()})`;
+        // Create a simple deck or add to existing 'Inbox' if logic allows. 
+        // For now, simple create new deck with 1 card.
+        createFlashcardDeck(deckName, [{
+            id: `fc_${Date.now()}`,
+            front: selectedText,
+            back: "...", // User fills later
+            box: 0, 
+            nextReview: 0
+        }]);
+        setTooltipPos(null);
+        alert("🃏 Đã tạo Flashcard mới trong Inbox Deck! Hãy vào sửa mặt sau.");
+        triggerReaction('success');
+    };
+
+    const handleManualCopy = () => {
+        navigator.clipboard.writeText(selectedText);
+        setTooltipPos(null);
+        // Visual feedback
+        const btn = document.getElementById('btn-copy-manual');
+        if(btn) btn.innerText = "Copied!";
+    };
+
+    // ... existing handlers ...
     const handleCreateNew = () => { setSelectedNoteId('new'); setViewMode('split'); };
     const handleSave = () => {
         if (!user || !title.trim()) { alert("Vui lòng nhập tiêu đề."); return; }
@@ -255,14 +319,13 @@ const NotebookPage: React.FC = () => {
         if (selectedNoteId && window.confirm("Xóa PDF đính kèm?")) { removePdfFromNote(selectedNoteId); setPdfFile(null); setPdfUrl(null); setViewMode('split'); }
     };
 
-    // UPDATED: handleFindConnections (Note Doctor)
     const handleFindConnections = async (isBackground = false) => {
         const apiKey = user ? db.USERS[user.id]?.apiKey : null;
         if (!apiKey) {
             if (!isBackground) setGlobalPage('api_key', { isApiKeyModalOpen: true });
             return;
         }
-        if (!content.trim() || content.length < 20) return; // Skip if too short
+        if (!content.trim() || content.length < 20) return; 
 
         if (!isBackground) {
             setIsAiProcessing(true);
@@ -270,16 +333,11 @@ const NotebookPage: React.FC = () => {
         }
 
         try {
-            // Prepare context
             const otherNotes = myNotes.filter(n => n.id !== selectedNoteId).map(n => ({ id: n.id, title: n.title, content: n.content }));
-            
-            // Call new service
             const suggestions = await checkNoteConnections(apiKey, content, otherNotes);
             
             if (suggestions.length > 0) { 
                 setAiConnectionSuggestions(suggestions);
-                
-                // FLOW TRIGGER: Pet reaction
                 if (isBackground) {
                     triggerReaction('hover_point');
                     say("Bác sĩ Note vừa tìm thấy liên kết thú vị! Xem ngay bên dưới nhé.", 5000);
@@ -302,11 +360,10 @@ const NotebookPage: React.FC = () => {
         const match = textBeforeCursor.match(/\[\[([^\]\n]*)$/);
         if (match) { setLinkSearchTerm(match[1]); setShowLinkSuggestions(true); } else { setShowLinkSuggestions(false); }
 
-        // DEBOUNCE AI CHECK
         if (analysisTimeoutRef.current) clearTimeout(analysisTimeoutRef.current);
         analysisTimeoutRef.current = window.setTimeout(() => {
-            handleFindConnections(true); // Run in background
-        }, 4000); // 4 seconds delay
+            handleFindConnections(true); 
+        }, 4000); 
     };
 
     const insertLinkSuggestion = (noteTitle: string) => {
@@ -427,7 +484,6 @@ const NotebookPage: React.FC = () => {
         });
     };
 
-    // --- NEW: Handle Convert to Lesson ---
     const handleConvertClick = () => {
         if (!title.trim() || !content.trim()) {
             alert("Vui lòng lưu nội dung ghi chú trước khi soạn bài.");
@@ -458,7 +514,6 @@ const NotebookPage: React.FC = () => {
         }
     };
 
-    // --- NEW: Refine with Oracle ---
     const handleRefineNote = async () => {
         if (!content.trim()) return;
         const apiKey = user ? db.USERS[user.id]?.apiKey : null;
@@ -481,7 +536,29 @@ const NotebookPage: React.FC = () => {
     if (!user) return null;
 
     return (
-        <div className="h-[calc(100vh-100px)] flex gap-4 pb-4">
+        <div className="h-[calc(100vh-100px)] flex gap-4 pb-4 relative">
+            
+            {/* INTERACTIVE TOOLTIP */}
+            {tooltipPos && (
+                <div 
+                    className="fixed z-50 flex flex-col gap-1 bg-gray-900 border border-blue-500/50 rounded-lg shadow-xl p-1 animate-pop-in pointer-events-auto"
+                    style={{ top: tooltipPos.top, left: tooltipPos.left }}
+                >
+                    <div className="flex gap-1">
+                        <button onClick={handleManualCreateTask} className="btn btn-xs bg-green-600 hover:bg-green-500 text-white flex items-center gap-1">
+                            ✅ Task
+                        </button>
+                        <button onClick={handleManualCreateFlashcard} className="btn btn-xs bg-yellow-600 hover:bg-yellow-500 text-black font-bold flex items-center gap-1">
+                            🃏 Card
+                        </button>
+                        <button id="btn-copy-manual" onClick={handleManualCopy} className="btn btn-xs bg-gray-700 hover:bg-gray-600 text-white flex items-center gap-1">
+                            📋 Copy
+                        </button>
+                    </div>
+                    <div className="w-2 h-2 bg-gray-900 border-b border-r border-blue-500/50 transform rotate-45 self-center -mt-1"></div>
+                </div>
+            )}
+
             <div className="w-1/5 min-w-[200px] flex flex-col gap-4 hidden md:flex">
                 <div className="p-4 bg-black/30 backdrop-blur-xl border border-white/10 rounded-2xl shadow-lg">
                     <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-300 to-purple-300 flex items-center gap-2 mb-4">
@@ -632,9 +709,10 @@ const NotebookPage: React.FC = () => {
                                     <textarea 
                                         ref={textareaRef} 
                                         className="w-full h-full bg-transparent text-gray-200 resize-none outline-none font-mono text-sm leading-relaxed custom-scrollbar p-6" 
-                                        placeholder="Ghi chú tại đây (Gõ [[ để liên kết)..." 
+                                        placeholder="Ghi chú tại đây (Gõ [[ để liên kết, bôi đen để tạo thẻ)..." 
                                         value={content} 
-                                        onChange={handleContentChange} 
+                                        onChange={handleContentChange}
+                                        onMouseUp={handleMouseUp} // ADDED HANDLER
                                     />
                                     {isAiProcessing && <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm z-20"><LoadingSpinner size={8} /><p className="text-blue-300 mt-2 animate-pulse font-bold">AI đang phân tích...</p></div>}
                                     

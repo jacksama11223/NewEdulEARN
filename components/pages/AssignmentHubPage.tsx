@@ -3,7 +3,8 @@ import React, { useState, useContext, useMemo, useCallback } from 'react';
 import { AuthContext, DataContext, GlobalStateContext, PageContext, PetContext } from '../../contexts/AppProviders';
 import { callGeminiApiWithSchema } from '../../services/geminiService';
 import LoadingSpinner from '../common/LoadingSpinner';
-import type { Assignment, LearningPath, QuizQuestion, LearningNode } from '../../types';
+import FlashcardModal from '../modals/FlashcardModal'; // Import Flashcard Modal
+import type { Assignment, LearningPath, QuizQuestion, LearningNode, FlashcardDeck } from '../../types';
 
 // --- HELPER: RANK LOGIC ---
 const getQuestRank = (asg: Assignment) => {
@@ -36,7 +37,7 @@ const getRankBadge = (rank: string, isBoss: boolean = false) => {
     }
 };
 
-// --- COMPONENT: WEEKLY CHEST ---
+// ... WeeklyChest & DailyQuestWidget & AiCommander components remain same ...
 const WeeklyChest: React.FC<{ activeDays: number }> = ({ activeDays }) => {
     return (
         <div className="card p-4 bg-gradient-to-r from-gray-900 to-slate-900 border border-gray-700 relative overflow-hidden">
@@ -67,25 +68,21 @@ const WeeklyChest: React.FC<{ activeDays: number }> = ({ activeDays }) => {
     );
 };
 
-// --- COMPONENT: DAILY QUESTS (SMART REVIEW) ---
 const DailyQuestWidget = () => {
     const { db } = useContext(DataContext)!;
     const { navigate } = useContext(PageContext)!;
     const { user } = useContext(AuthContext)!;
 
-    // 1. Static Quests
     const staticQuests = [
         { id: 'q1', title: 'Đăng nhập trước 9h', reward: '10 XP', done: true, action: null },
     ];
 
-    // 2. Dynamic SRS Quests (Nodes that need repair)
     const repairQuests = useMemo(() => {
         const quests: any[] = [];
         const now = Date.now();
 
         if (user) {
             Object.values(db.LEARNING_PATHS || {}).forEach((path: LearningPath) => {
-                // Only scan user's own paths
                 if (path.creatorId !== user.id) return;
 
                 path.nodes.forEach((node: LearningNode) => {
@@ -107,14 +104,13 @@ const DailyQuestWidget = () => {
                 });
             });
         }
-        return quests.slice(0, 2); // Limit to top 2 repairs to not overwhelm
+        return quests.slice(0, 2);
     }, [db.LEARNING_PATHS, user]);
 
     const allQuests = [...staticQuests, ...repairQuests];
 
     const handleQuestClick = (q: any) => {
         if (q.isRepair) {
-            // Navigate to Study Page with 'repair' mode
             navigate('learning_node_study', { pathId: q.pathId, nodeId: q.nodeId, mode: 'repair' });
         }
     };
@@ -155,7 +151,6 @@ const DailyQuestWidget = () => {
     );
 };
 
-// --- COMPONENT: AI COMMANDER ---
 const AiCommander: React.FC<{ recommendedTask: any, onClick: () => void }> = ({ recommendedTask, onClick }) => {
     if (!recommendedTask) return (
         <div className="card p-6 flex items-center gap-4 border-blue-500/30 bg-blue-900/10">
@@ -197,16 +192,17 @@ const AiCommander: React.FC<{ recommendedTask: any, onClick: () => void }> = ({ 
 const AssignmentHubPage: React.FC = () => {
     const { user } = useContext(AuthContext)!;
     const { db, addTask } = useContext(DataContext)!; 
-    const { navigate, params } = useContext(PageContext)!; // Added params
+    const { navigate, params } = useContext(PageContext)!; 
     const { serviceStatus } = useContext(GlobalStateContext)!;
     const { triggerReaction } = useContext(PetContext)!;
     
-    const [tab, setTab] = useState<'quests' | 'paths' | 'manage' | 'create'>('quests'); 
+    // UPDATED: Added 'decks' to tab state
+    const [tab, setTab] = useState<'quests' | 'paths' | 'decks' | 'manage' | 'create'>('quests'); 
+    const [selectedDeck, setSelectedDeck] = useState<FlashcardDeck | null>(null); // For Deck Modal
     
     const isStudentServiceOk = serviceStatus.assessment_taking === 'OPERATIONAL';
     const isTeacherGradingOk = serviceStatus.grading_service === 'OPERATIONAL';
 
-    // Check for filters from Energy Check flow
     const filterCourseId = params?.filterCourseId;
     const filteredCourseName = filterCourseId ? db.COURSES.find(c => c.id === filterCourseId)?.name : null;
 
@@ -215,18 +211,16 @@ const AssignmentHubPage: React.FC = () => {
         if (user?.role === 'STUDENT' && (tab === 'manage' || tab === 'create')) setTab('quests');
     }, [user?.role]);
 
-    const { allAssignments, studentTodo, studentDone, learningPaths } = useMemo(() => {
+    const { allAssignments, studentTodo, studentDone, learningPaths, allDecks } = useMemo(() => {
         const assignments = Object.values(db.ASSIGNMENTS) as Assignment[];
-        // FILTER: Only show paths created by the current user (so assigned copies show up for student, but teacher sees their own templates/copies)
-        // In a real app, teacher might want to see all student paths, but for Hub view, "My Paths" makes sense.
         const allPaths = Object.values(db.LEARNING_PATHS || {}) as LearningPath[];
         const paths = user ? allPaths.filter(p => p.creatorId === user.id) : [];
+        const decks = Object.values(db.FLASHCARD_DECKS) as FlashcardDeck[]; // Get All Decks
 
         let todo: any[] = [];
         let done: any[] = [];
         if (user?.role === 'STUDENT') {
             assignments.forEach(asg => {
-                // Apply filter if exists
                 if (filterCourseId && asg.courseId !== filterCourseId) return;
 
                 let sub: any;
@@ -246,8 +240,8 @@ const AssignmentHubPage: React.FC = () => {
         
         todo.sort((a, b) => a.rank.localeCompare(b.rank));
 
-        return { allAssignments: assignments, studentTodo: todo, studentDone: done, learningPaths: paths };
-    }, [db.ASSIGNMENTS, db.FILE_SUBMISSIONS, db.QUIZ_SUBMISSIONS, db.LEARNING_PATHS, user, filterCourseId]);
+        return { allAssignments: assignments, studentTodo: todo, studentDone: done, learningPaths: paths, allDecks: decks };
+    }, [db.ASSIGNMENTS, db.FILE_SUBMISSIONS, db.QUIZ_SUBMISSIONS, db.LEARNING_PATHS, db.FLASHCARD_DECKS, user, filterCourseId]);
 
     const handleOpenPath = (pathId: string) => {
         navigate('learning_path_detail', { pathId });
@@ -269,24 +263,20 @@ const AssignmentHubPage: React.FC = () => {
     }, [navigate]);
 
     const handleClearFilter = () => {
-        navigate('assignment_hub', {}); // Navigate with empty params to clear
+        navigate('assignment_hub', {}); 
     };
 
     const renderQuestCard = useCallback((asg: any, isDone: boolean) => {
+        // ... (Keep existing implementation of renderQuestCard)
         const isBoss = !!asg.isBoss;
         const rankColor = getRankColor(asg.rank, isBoss);
         const badge = getRankBadge(asg.rank, isBoss);
         const xpReward = asg.rewardXP || (asg.rank === 'S' ? 500 : asg.rank === 'A' ? 300 : 100);
-        
         const isNew = asg.createdAt && (new Date().getTime() - new Date(asg.createdAt).getTime()) < 24 * 60 * 60 * 1000;
         const isTeacher = user?.role === 'TEACHER';
-
         const quizData = asg.quizId ? db.QUIZZES[asg.quizId] : null;
         const hasContent = quizData && quizData.questions && quizData.questions.length > 0;
-
-        const isActionDisabled = isTeacher 
-            ? !isTeacherGradingOk 
-            : !isStudentServiceOk;
+        const isActionDisabled = isTeacher ? !isTeacherGradingOk : !isStudentServiceOk;
 
         return (
             <div 
@@ -300,9 +290,7 @@ const AssignmentHubPage: React.FC = () => {
                             {badge.label}
                         </span>
                         {isNew && !isDone && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-600 text-white animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.5)]">
-                                NEW
-                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-600 text-white animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.5)]">NEW</span>
                         )}
                         {isTeacher && asg.type === 'quiz' && (
                             hasContent 
@@ -314,10 +302,8 @@ const AssignmentHubPage: React.FC = () => {
                         {db.COURSES.find(c => c.id === asg.courseId)?.name || asg.courseId}
                     </span>
                 </div>
-                
                 <div className="p-6 flex-1 relative overflow-hidden">
                     {isBoss && <div className="absolute -right-4 -bottom-4 text-8xl opacity-20 rotate-12 pointer-events-none animate-pulse">👹</div>}
-                    
                     <h3 className="text-xl font-bold text-white mb-2 group-hover:text-blue-200 transition-colors line-clamp-2">{asg.title}</h3>
                     <div className="flex items-center gap-2 text-sm text-gray-400">
                         <span>{asg.type === 'quiz' ? '⚡ Trắc nghiệm' : '📄 Nộp File'}</span>
@@ -327,80 +313,26 @@ const AssignmentHubPage: React.FC = () => {
                     {asg.description && <p className="text-xs text-gray-400 mt-2 line-clamp-2 italic">{asg.description}</p>}
                     {isBoss && <p className="text-xs text-red-400 font-bold mt-2 animate-pulse bg-red-900/20 px-2 py-1 rounded inline-block border border-red-500/30">⚠️ MỤC TIÊU NGUY HIỂM</p>}
                 </div>
-
                 <div className={`p-4 bg-black/20 flex relative z-10 gap-2 ${isTeacher ? 'flex-row' : 'justify-between items-center'}`}>
-                    
-                    {/* STUDENT ACTIONS */}
                     {!isTeacher && !isDone && (
                         <div className="flex gap-2 w-full">
-                            <button 
-                                onClick={() => handleAskStrategy(asg)}
-                                className="btn btn-sm bg-purple-900/50 border border-purple-500/30 text-purple-200 hover:bg-purple-700/50 text-xs px-2 flex-1"
-                                title="Xin chiến thuật từ AI Commander"
-                            >
-                                🧠 Xin Chiến Thuật
-                            </button>
-                            <button 
-                                onClick={() => handleAddToTasks(asg)}
-                                className="btn btn-sm btn-secondary text-xs px-2"
-                                title="Ghim vào danh sách Task hàng ngày"
-                            >
-                                📌 Ghim
-                            </button>
+                            <button onClick={() => handleAskStrategy(asg)} className="btn btn-sm bg-purple-900/50 border border-purple-500/30 text-purple-200 hover:bg-purple-700/50 text-xs px-2 flex-1">🧠 Xin Chiến Thuật</button>
+                            <button onClick={() => handleAddToTasks(asg)} className="btn btn-sm btn-secondary text-xs px-2">📌 Ghim</button>
                         </div>
                     )}
-                    
-                    {/* TEACHER ACTIONS */}
                     {isTeacher ? (
                         <>
                             {asg.type === 'quiz' && !hasContent ? (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        navigate('assignment_viewer', { assignmentId: asg.id }); // Go to Viewer to generate
-                                    }}
-                                    className="btn btn-sm btn-primary text-xs px-4 py-2 w-full animate-pulse shadow-lg bg-indigo-600 hover:bg-indigo-500"
-                                >
-                                    ✨ Tạo Câu Hỏi (AI)
-                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); navigate('assignment_viewer', { assignmentId: asg.id }); }} className="btn btn-sm btn-primary text-xs px-4 py-2 w-full animate-pulse shadow-lg bg-indigo-600 hover:bg-indigo-500">✨ Tạo Câu Hỏi (AI)</button>
                             ) : (
                                 <>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            navigate('gradebook', { assignmentId: asg.id });
-                                        }}
-                                        className="btn btn-sm btn-primary text-xs px-4 py-2 flex-1 shadow-lg"
-                                        disabled={isActionDisabled}
-                                    >
-                                        📝 Chấm điểm
-                                    </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            navigate('assignment_creator', { mode: 'edit', assignmentId: asg.id });
-                                        }}
-                                        className="btn btn-sm btn-secondary text-xs px-3 py-2 border-white/20"
-                                        title="Chỉnh sửa nội dung"
-                                    >
-                                        ✏️
-                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); navigate('gradebook', { assignmentId: asg.id }); }} className="btn btn-sm btn-primary text-xs px-4 py-2 flex-1 shadow-lg" disabled={isActionDisabled}>📝 Chấm điểm</button>
+                                    <button onClick={(e) => { e.stopPropagation(); navigate('assignment_creator', { mode: 'edit', assignmentId: asg.id }); }} className="btn btn-sm btn-secondary text-xs px-3 py-2 border-white/20">✏️</button>
                                 </>
                             )}
                         </>
                     ) : (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                navigate('assignment_viewer', { assignmentId: asg.id });
-                            }}
-                            className={`btn btn-sm text-xs px-4 py-2 rounded-lg shadow-lg flex-1 w-full 
-                                ${isDone ? 'btn-secondary' : 'btn-primary'}`}
-                            disabled={isActionDisabled}
-                            title={isActionDisabled ? "Dịch vụ liên quan đang bảo trì" : ""}
-                        >
-                            {isDone ? 'Xem lại' : (isBoss ? '🔥 RAID NGAY' : '⚔️ Chiến ngay')}
-                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); navigate('assignment_viewer', { assignmentId: asg.id }); }} className={`btn btn-sm text-xs px-4 py-2 rounded-lg shadow-lg flex-1 w-full ${isDone ? 'btn-secondary' : 'btn-primary'}`} disabled={isActionDisabled} title={isActionDisabled ? "Dịch vụ liên quan đang bảo trì" : ""}>{isDone ? 'Xem lại' : (isBoss ? '🔥 RAID NGAY' : '⚔️ Chiến ngay')}</button>
                     )}
                 </div>
             </div>
@@ -430,7 +362,6 @@ const AssignmentHubPage: React.FC = () => {
                 {user?.role === 'TEACHER' ? 'Trung Tâm Quản Lý' : 'Hội Quán Nhiệm Vụ'}
             </h1>
 
-            {/* FILTER BANNER */}
             {filterCourseId && (
                 <div className="bg-yellow-900/30 border border-yellow-500/50 p-4 rounded-xl flex justify-between items-center animate-pop-in">
                     <div className="flex items-center gap-3">
@@ -473,6 +404,7 @@ const AssignmentHubPage: React.FC = () => {
                     <NavButton id="quests" label="Bảng Nhiệm vụ" icon="📜" count={studentTodo.length} />
                 )}
                 <NavButton id="paths" label="Bản đồ Lộ trình" icon="🗺️" count={learningPaths.length} />
+                <NavButton id="decks" label="Kho Thẻ (Inbox)" icon="🃏" count={allDecks.length} /> {/* NEW TAB */}
             </div>
 
             <div className="animate-fade-in-up">
@@ -489,7 +421,6 @@ const AssignmentHubPage: React.FC = () => {
                                 </div>
                             </div>
                         )}
-                        
                         {studentDone.length > 0 && (
                             <div className="opacity-80">
                                 <h2 className="text-2xl font-bold text-gray-400 mb-6 flex items-center gap-2">
@@ -500,11 +431,53 @@ const AssignmentHubPage: React.FC = () => {
                                 </div>
                             </div>
                         )}
-
                         {studentTodo.length === 0 && studentDone.length === 0 && (
                             <div className="text-center p-12 border-2 border-dashed border-gray-700 rounded-3xl">
                                 <div className="text-6xl mb-4">zzz</div>
                                 <p className="text-gray-500">Chưa có nhiệm vụ nào được giao.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* NEW DECKS TAB */}
+                {tab === 'decks' && (
+                    <div className="space-y-8">
+                        <div className="flex justify-between items-center bg-white/5 p-6 rounded-3xl border border-white/10">
+                            <div>
+                                <h2 className="text-2xl font-bold text-white">Kho Thẻ Ghi Nhớ</h2>
+                                <p className="text-gray-400 text-sm">Tất cả các bộ Flashcard bạn đã tạo hoặc được giao.</p>
+                            </div>
+                            <button onClick={() => navigate('notebook')} className="btn btn-secondary bg-purple-900/30 text-purple-300 border-purple-500/30 hover:bg-purple-900/50">
+                                + Tạo từ Sổ Tay
+                            </button>
+                        </div>
+
+                        {allDecks.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                {allDecks.map(deck => (
+                                    <div 
+                                        key={deck.id} 
+                                        onClick={() => setSelectedDeck(deck)}
+                                        className="card p-6 cursor-pointer hover:-translate-y-2 hover:shadow-2xl transition-all border-purple-500/30 group bg-gray-900/50"
+                                    >
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="text-4xl group-hover:scale-110 transition-transform">🗂️</div>
+                                            <span className="text-xs bg-purple-900 text-purple-200 px-2 py-1 rounded font-bold">
+                                                {deck.cards.length} Thẻ
+                                            </span>
+                                        </div>
+                                        <h3 className="text-lg font-bold text-white mb-2 line-clamp-1">{deck.title}</h3>
+                                        <p className="text-xs text-gray-400 font-mono">ID: {deck.id}</p>
+                                        <div className="mt-4 pt-4 border-t border-white/5 flex justify-end">
+                                            <span className="text-xs text-purple-400 font-bold group-hover:underline">Ôn tập ngay &rarr;</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-20 text-gray-500">
+                                <p>Chưa có bộ thẻ nào.</p>
                             </div>
                         )}
                     </div>
@@ -602,6 +575,12 @@ const AssignmentHubPage: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            <FlashcardModal 
+                isOpen={!!selectedDeck} 
+                onClose={() => setSelectedDeck(null)} 
+                deck={selectedDeck} 
+            />
         </div>
     );
 };

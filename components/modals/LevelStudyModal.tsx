@@ -15,7 +15,7 @@ interface LevelStudyModalProps {
     isLastNode: boolean;
 }
 
-type StudyPhase = 'START' | 'GEN_FLASHCARDS' | 'STUDY_FLASHCARDS' | 'GEN_EXAM' | 'TAKE_EXAM' | 'RESULT' | 'EXTENDING_PATH';
+type StudyPhase = 'START' | 'GEN_FLASHCARDS' | 'MANUAL_ENTRY_FLASHCARDS' | 'STUDY_FLASHCARDS' | 'GEN_EXAM' | 'MANUAL_ENTRY_EXAM' | 'TAKE_EXAM' | 'RESULT' | 'EXTENDING_PATH';
 
 // Helper for dynamic font size
 const getFontSize = (text: string) => {
@@ -26,7 +26,7 @@ const getFontSize = (text: string) => {
 };
 
 // OPTIMIZATION: Lower threshold to 10 to match single AI batch generation
-const MASTERY_THRESHOLD = 10;
+const MASTERY_THRESHOLD = 5; // Reduced to 5 for manual mode friendliness
 
 const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, pathId, node, isLastNode }) => {
     const { user } = useContext(AuthContext)!;
@@ -38,6 +38,9 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
     const [currentCardIndex, setCurrentCardIndex] = useState(0);
     const [masteredCount, setMasteredCount] = useState(node.flashcardsMastered || 0);
     const [isFlipped, setIsFlipped] = useState(false);
+
+    // Manual Entry State
+    const [manualInputs, setManualInputs] = useState<{front: string, back: string}[]>([{front: '', back: ''}, {front: '', back: ''}, {front: '', back: ''}]);
 
     const [examQuestions, setExamQuestions] = useState<ExamQuestion[]>([]);
     const [examAnswers, setExamAnswers] = useState<Record<string, string>>({});
@@ -52,50 +55,84 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
             setMasteredCount(node.flashcardsMastered || 0);
             setExamScore(node.examScore || 0);
             setError(null);
+            // Reset manual inputs
+            setManualInputs([{front: '', back: ''}, {front: '', back: ''}, {front: '', back: ''}]);
         }
     }, [isOpen, node]);
 
     // --- PHASE 1: FLASHCARDS ---
-    const startFlashcards = async () => {
-        // Check if user already mastered enough to take exam
-        if (masteredCount >= MASTERY_THRESHOLD) {
-            const confirmReview = window.confirm("Bạn đã đủ điều kiện thi. Bạn có muốn học thêm từ vựng mới không?");
-            if (!confirmReview) {
-                setPhase('GEN_EXAM');
-                return;
-            }
-        }
-
-        // Use existing cards if available and not mastered
+    
+    // Check existing
+    const checkExistingCards = () => {
         if (node.flashcards && node.flashcards.length > 0 && node.flashcards.some(c => (c.box || 0) < 1)) {
              setFlashcards(node.flashcards);
              setFlashcardQueue(node.flashcards.filter(c => (c.box || 0) < 1));
              setPhase('STUDY_FLASHCARDS');
              setCurrentCardIndex(0);
              setIsFlipped(false);
-             return;
+             return true;
         }
+        return false;
+    };
+
+    const startFlashcardsAI = async () => {
+        if (checkExistingCards()) return;
 
         setPhase('GEN_FLASHCARDS');
         const apiKey = user ? db.USERS[user.id]?.apiKey : null;
         if (!apiKey) { setError("Vui lòng cấu hình API Key."); setPhase('START'); return; }
 
         try {
-            // JIT Generation: Generate only when user enters here
             const cards = await generateNodeFlashcards(apiKey, node.title, node.description);
-            
-            // Save generated cards to DB so we don't regenerate next time
             updateNodeProgress(pathId, node.id, { flashcards: cards });
-            
             setFlashcards(cards);
             setFlashcardQueue(cards); 
             setPhase('STUDY_FLASHCARDS');
             setCurrentCardIndex(0);
             setIsFlipped(false);
         } catch (e) {
-            setError("Lỗi tạo Flashcards. Vui lòng thử lại.");
+            setError("Lỗi tạo Flashcards. Vui lòng thử lại hoặc dùng chế độ Thủ công.");
             setPhase('START');
         }
+    };
+
+    const startFlashcardsManual = () => {
+        if (checkExistingCards()) return;
+        setPhase('MANUAL_ENTRY_FLASHCARDS');
+    };
+
+    // Manual Entry Logic
+    const handleManualInputChange = (index: number, field: 'front' | 'back', value: string) => {
+        const newInputs = [...manualInputs];
+        newInputs[index][field] = value;
+        setManualInputs(newInputs);
+    };
+
+    const addManualRow = () => {
+        setManualInputs([...manualInputs, {front: '', back: ''}]);
+    };
+
+    const saveManualCards = () => {
+        const validCards = manualInputs.filter(i => i.front.trim() && i.back.trim());
+        if (validCards.length === 0) {
+            alert("Vui lòng nhập ít nhất 1 thẻ hoàn chỉnh.");
+            return;
+        }
+
+        const newCards: Flashcard[] = validCards.map((c, i) => ({
+            id: `fc_man_${Date.now()}_${i}`,
+            front: c.front,
+            back: c.back,
+            box: 0,
+            nextReview: 0
+        }));
+
+        updateNodeProgress(pathId, node.id, { flashcards: newCards });
+        setFlashcards(newCards);
+        setFlashcardQueue(newCards);
+        setPhase('STUDY_FLASHCARDS');
+        setCurrentCardIndex(0);
+        setIsFlipped(false);
     };
 
     const handleFlashcardResult = (difficulty: 'easy' | 'medium' | 'hard') => {
@@ -104,36 +141,31 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         let newMasteredCount = masteredCount;
 
         if (difficulty === 'easy') {
-            // Remove from queue, increment mastery
             nextQueue.splice(currentCardIndex, 1);
             newMasteredCount++;
             setMasteredCount(newMasteredCount);
-            // Update Global State immediately
             updateNodeProgress(pathId, node.id, { flashcardsMastered: newMasteredCount });
         } else {
-            // Move to end of queue
             nextQueue.push(nextQueue.splice(currentCardIndex, 1)[0]);
         }
 
         setFlashcardQueue(nextQueue);
         setIsFlipped(false);
         
-        // Logic to proceed
         if (newMasteredCount >= MASTERY_THRESHOLD) {
             alert(`Chúc mừng! Bạn đã thuộc ${MASTERY_THRESHOLD} thẻ. Mở khóa bài kiểm tra!`);
-            setPhase('GEN_EXAM');
+            setPhase('START'); // Go back to start to choose exam mode
             updateNodeProgress(pathId, node.id, { isExamUnlocked: true });
         } else if (nextQueue.length === 0) {
-             alert("Hết thẻ! Đang tạo thêm thẻ mới...");
-             startFlashcards(); 
+             alert("Hết thẻ! Hãy thêm thẻ mới.");
+             setPhase('START'); 
         } else {
             setCurrentCardIndex(0);
         }
     };
 
     // --- PHASE 2: EXAM ---
-    const startExam = async () => {
-        // Check if persisted questions exist
+    const startExamAI = async () => {
         if (node.examQuestions && node.examQuestions.length > 0) {
             setExamQuestions(node.examQuestions);
             setExamAnswers({});
@@ -146,9 +178,7 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         if (!apiKey) { setError("Thiếu API Key."); return; }
 
         try {
-            // JIT Generation: Generate exam only when needed
             const questions = await generateNodeExam(apiKey, node.title);
-            // Save questions to persistence
             updateNodeProgress(pathId, node.id, { examQuestions: questions });
             setExamQuestions(questions);
             setExamAnswers({});
@@ -156,6 +186,17 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
         } catch (e) {
             setError("Lỗi tạo bài kiểm tra.");
             setPhase('START');
+        }
+    };
+
+    // Note: Manual Exam Creation is complex for a student flow, sticking to AI or just simple quiz
+    // But we can allow "Self Report" if they studied offline
+    const handleSelfReport = () => {
+        if (confirm("Bạn xác nhận đã tự ôn tập và nắm vững kiến thức này?")) {
+            setExamScore(100);
+            updateNodeProgress(pathId, node.id, { examScore: 100, isCompleted: true });
+            unlockNextNode(pathId, node.id);
+            setPhase('RESULT');
         }
     };
 
@@ -228,23 +269,70 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
                 </div>
             </div>
 
-            <div className="space-y-3">
-                <button 
-                    onClick={startFlashcards} 
-                    className="btn btn-primary w-full max-w-xs mx-auto"
-                >
-                    {masteredCount >= MASTERY_THRESHOLD ? '🧠 Học thêm Flashcards (AI)' : '🧠 Bắt đầu Học (Tạo bởi AI)'}
-                </button>
+            <div className="space-y-4 pt-4 border-t border-gray-700">
+                <div className="flex flex-col gap-2 max-w-xs mx-auto">
+                    <p className="text-xs text-gray-400 uppercase font-bold">1. Học Từ Vựng</p>
+                    <button onClick={startFlashcardsAI} className="btn btn-primary flex items-center justify-center gap-2">
+                        <span>✨</span> Tạo Tự Động (AI)
+                    </button>
+                    <button onClick={startFlashcardsManual} className="btn btn-secondary flex items-center justify-center gap-2">
+                        <span>✍️</span> Nhập Thủ Công
+                    </button>
+                </div>
                 
-                <button 
-                    onClick={startExam} 
-                    className={`btn w-full max-w-xs mx-auto ${masteredCount >= MASTERY_THRESHOLD ? 'btn-primary bg-purple-600 hover:bg-purple-500' : 'btn-secondary opacity-50 cursor-not-allowed'}`}
-                    disabled={masteredCount < MASTERY_THRESHOLD}
-                >
-                    {masteredCount >= MASTERY_THRESHOLD ? '📝 Làm bài kiểm tra (Tạo bởi AI)' : `🔒 Khóa Kiểm tra (Cần ${MASTERY_THRESHOLD} từ)`}
-                </button>
+                <div className="flex flex-col gap-2 max-w-xs mx-auto">
+                    <p className="text-xs text-gray-400 uppercase font-bold">2. Kiểm tra</p>
+                    <button 
+                        onClick={startExamAI} 
+                        className={`btn ${masteredCount >= MASTERY_THRESHOLD ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'btn-secondary opacity-50 cursor-not-allowed'}`}
+                        disabled={masteredCount < MASTERY_THRESHOLD}
+                    >
+                        {masteredCount >= MASTERY_THRESHOLD ? '📝 Thi với AI' : `🔒 Cần ${MASTERY_THRESHOLD} từ`}
+                    </button>
+                    
+                    {masteredCount >= MASTERY_THRESHOLD && (
+                        <button onClick={handleSelfReport} className="text-xs text-gray-500 hover:text-white underline mt-1">
+                            Tôi đã tự học bên ngoài (Self Report)
+                        </button>
+                    )}
+                </div>
             </div>
-            {masteredCount < MASTERY_THRESHOLD && <p className="text-xs text-yellow-500 mt-2">Nội dung sẽ được AI tạo tự động khi bạn nhấn Bắt đầu.</p>}
+        </div>
+    );
+
+    const renderManualEntry = () => (
+        <div className="py-4 space-y-4">
+            <div className="flex justify-between items-center">
+                <h3 className="text-lg font-bold text-white">✍️ Soạn thẻ ghi nhớ</h3>
+                <button onClick={() => setPhase('START')} className="text-sm text-gray-400 hover:text-white">Quay lại</button>
+            </div>
+            
+            <div className="space-y-3 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
+                {manualInputs.map((item, idx) => (
+                    <div key={idx} className="flex gap-2 items-start bg-gray-800 p-2 rounded-lg">
+                        <div className="w-6 text-center text-gray-500 font-bold pt-2">{idx + 1}</div>
+                        <div className="flex-1 space-y-2">
+                            <input 
+                                className="form-input w-full text-sm bg-black/30" 
+                                placeholder="Mặt trước (Thuật ngữ)"
+                                value={item.front}
+                                onChange={e => handleManualInputChange(idx, 'front', e.target.value)}
+                            />
+                            <input 
+                                className="form-input w-full text-sm bg-black/30" 
+                                placeholder="Mặt sau (Định nghĩa)"
+                                value={item.back}
+                                onChange={e => handleManualInputChange(idx, 'back', e.target.value)}
+                            />
+                        </div>
+                    </div>
+                ))}
+            </div>
+            
+            <div className="flex gap-2">
+                <button onClick={addManualRow} className="btn btn-secondary flex-1 text-sm">+ Thêm dòng</button>
+                <button onClick={saveManualCards} className="btn btn-primary flex-[2]">Lưu & Bắt đầu học</button>
+            </div>
         </div>
     );
 
@@ -380,6 +468,7 @@ const LevelStudyModal: React.FC<LevelStudyModalProps> = ({ isOpen, onClose, path
                 {error && <div className="bg-red-900/50 border border-red-700 text-red-300 p-3 rounded mb-4 text-center">{error}</div>}
                 
                 {phase === 'START' && renderStart()}
+                {phase === 'MANUAL_ENTRY_FLASHCARDS' && renderManualEntry()}
                 
                 {(phase === 'GEN_FLASHCARDS' || phase === 'GEN_EXAM' || phase === 'EXTENDING_PATH') && (
                     <div className="text-center py-12">

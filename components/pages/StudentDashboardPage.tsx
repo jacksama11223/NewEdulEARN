@@ -584,7 +584,8 @@ export const MusicWidget: React.FC = () => {
 
 export const FocusTimerWidget = () => {
     const { pomodoro, setPomodoro, setDeepWorkMode } = useContext(GlobalStateContext)!;
-    const { addTask, db, archiveCompletedTasks } = useContext(DataContext)!;
+    // Updated: Destructure toggleTaskCompletion
+    const { addTask, db, archiveCompletedTasks, toggleTaskCompletion, playSound } = useContext(DataContext)!;
     const { user } = useContext(AuthContext)!;
     const { navigate } = useContext(PageContext)!;
     const { triggerReaction } = useContext(PetContext)!;
@@ -671,6 +672,11 @@ export const FocusTimerWidget = () => {
         }
     };
 
+    const handleToggleTask = (taskId: string, status: boolean) => {
+        toggleTaskCompletion(taskId, status);
+        if (status) playSound('tap');
+    };
+
     const myTasks = user ? ((Object.values(db.TASKS) as Task[]).filter(t => t.userId === user.id && !t.isArchived) || []) : [];
 
     return (
@@ -710,14 +716,19 @@ export const FocusTimerWidget = () => {
                     <div className="max-h-20 overflow-y-auto custom-scrollbar space-y-1">
                         {myTasks.map(t => (
                             <div key={t.id} className="flex items-center gap-2 text-xs group">
-                                <input type="checkbox" checked={t.isCompleted} onChange={() => {}} className="cursor-pointer" /> 
+                                <input 
+                                    type="checkbox" 
+                                    checked={t.isCompleted} 
+                                    onChange={(e) => handleToggleTask(t.id, e.target.checked)} 
+                                    className="cursor-pointer" 
+                                /> 
                                 <span className={`flex-1 truncate ${t.isCompleted ? 'line-through text-gray-500' : 'text-gray-300'}`}>{t.text}</span>
                             </div>
                         ))}
                     </div>
                     {myTasks.some(t => t.isCompleted) && (
-                        <button onClick={() => user && archiveCompletedTasks(user.id)} className="w-full text-[10px] text-gray-500 hover:text-white border-t border-white/5 pt-1 mt-1">
-                            Lưu trữ task đã xong
+                        <button onClick={() => user && archiveCompletedTasks(user.id)} className="w-full text-[10px] text-gray-500 hover:text-white border-t border-white/5 pt-1 mt-1 flex items-center justify-center gap-1">
+                            <span>📥</span> Lưu trữ (Clear)
                         </button>
                     )}
                 </div>

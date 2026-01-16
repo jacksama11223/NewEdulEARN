@@ -264,7 +264,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // Init new audio
             const audio = new Audio(skinConfig.musicUrl);
             themeAudioRef.current = audio;
-            audio.volume = 0.3; // Base volume for ambience
+            audio.volume = 0.7; // INCREASED: Base volume for ambience (was 0.3)
             audio.loop = false;
 
             const playPromise = audio.play();

@@ -37,7 +37,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(-45deg, #0f2027, #203a43, #2c5364, #240b36, #c31432)'
         },
         effect: { type: 'star', particleCount: 100, speedFactor: 1, sizeFactor: 1 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2092/2092-preview.mp3' // Space Ambience
+        // Deep Space Drone / Cinematic
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2094/2094-preview.mp3' 
     },
     'skin_neon': {
         id: 'skin_neon',
@@ -51,7 +52,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(-45deg, #000000, #1a0b2e, #111827, #0f172a, #2e1065)'
         },
         effect: { type: 'matrix', particleCount: 80, speedFactor: 1.5, sizeFactor: 1.2 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/246/246-preview.mp3' // Sci-fi/Cyber scan
+        // Cyberpunk / Tech Interface Hum
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3' 
     },
     'skin_gold': {
         id: 'skin_gold',
@@ -65,7 +67,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(-45deg, #271c19, #451a03, #78350f, #1c1917, #000000)'
         },
         effect: { type: 'sparkle', particleCount: 60, speedFactor: 0.5, sizeFactor: 1.5 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3' // Magical/Royal
+        // Magical Chime / Treasure Sound
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3' 
     },
     'skin_forest': {
         id: 'skin_forest',
@@ -79,7 +82,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(-45deg, #022c22, #064e3b, #065f46, #14532d, #0f172a)'
         },
         effect: { type: 'leaf_firefly', particleCount: 50, speedFactor: 0.8, sizeFactor: 1 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2432/2432-preview.mp3' // Forest Birds
+        // Forest Ambience / Birds
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2432/2432-preview.mp3' 
     },
     'skin_fire': {
         id: 'skin_fire',
@@ -93,7 +97,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(-45deg, #450a0a, #7f1d1d, #991b1b, #c2410c, #000000)'
         },
         effect: { type: 'ember', particleCount: 120, speedFactor: 1.2, sizeFactor: 1 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/1273/1273-preview.mp3' // Fire crackling
+        // Fire Crackling
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/1273/1273-preview.mp3' 
     },
     'skin_galaxy': {
         id: 'skin_galaxy',
@@ -107,7 +112,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(-45deg, #0f172a, #1e1b4b, #312e81, #4c1d95, #000000)'
         },
         effect: { type: 'spiral', particleCount: 200, speedFactor: 0.5, sizeFactor: 0.8 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2094/2094-preview.mp3' // Ethereal Space
+        // Ethereal Sweep / Sci-fi warp
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2092/2092-preview.mp3' 
     },
     'skin_ocean': {
         id: 'skin_ocean',
@@ -121,7 +127,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(180deg, #0f172a 0%, #082f49 50%, #0c4a6e 100%)'
         },
         effect: { type: 'bubble', particleCount: 60, speedFactor: 0.7, sizeFactor: 2 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/112/112-preview.mp3' // Ocean Waves
+        // Ocean Waves / Water
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/112/112-preview.mp3' 
     },
     'skin_sunset': {
         id: 'skin_sunset',
@@ -135,7 +142,8 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(180deg, #4c0519 0%, #be123c 40%, #fb923c 100%)'
         },
         effect: { type: 'cloud_bird', particleCount: 15, speedFactor: 0.3, sizeFactor: 1 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2513/2513-preview.mp3' // Chill/Relax
+        // Chill Lofi Beat / Relaxing
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/2513/2513-preview.mp3' 
     },
     'skin_cherry': {
         id: 'skin_cherry',
@@ -149,6 +157,7 @@ export const SKIN_CONFIG: Record<string, SkinConfigItem> = {
             skyGradient: 'linear-gradient(135deg, #831843 0%, #db2777 50%, #fce7f3 100%)'
         },
         effect: { type: 'petal', particleCount: 50, speedFactor: 1, sizeFactor: 1.5 },
-        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/209/209-preview.mp3' // Gentle Bells/Piano (Cherry Blossom Vibe)
+        // FIXED: Distinct Japanese Wind Chime / Zen Bell sound
+        musicUrl: 'https://assets.mixkit.co/active_storage/sfx/530/530-preview.mp3' 
     }
 };

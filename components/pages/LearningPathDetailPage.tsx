@@ -45,7 +45,7 @@ const getClassNodeStatus = (itemId: string, itemType: string, students: User[], 
 };
 
 const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId }) => {
-    const { db, equipShopItem } = useContext(DataContext)!;
+    const { db, equipShopItem, extendLearningPath } = useContext(DataContext)!;
     const { user } = useContext(AuthContext)!;
     const { navigate, params } = useContext(PageContext)!;
     
@@ -53,6 +53,12 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
     const [isGatekeeperOpen, setIsGatekeeperOpen] = useState(false); 
     const [isSpeedRunOpen, setIsSpeedRunOpen] = useState(false); 
     const [isTreasureOpen, setIsTreasureOpen] = useState(false);
+    
+    // Manual Node Add State
+    const [isAddNodeModalOpen, setIsAddNodeModalOpen] = useState(false);
+    const [newNodeTitle, setNewNodeTitle] = useState('');
+    const [newNodeDesc, setNewNodeDesc] = useState('');
+    const [newNodeType, setNewNodeType] = useState<'theory' | 'practice' | 'challenge'>('theory');
     
     // Theme Adaptation State
     const [isSkinPromptOpen, setIsSkinPromptOpen] = useState(false);
@@ -68,7 +74,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
     const [isTourOpen, setIsTourOpen] = useState(false);
 
     // --- DETERMINE PATH DATA ---
-    // If aggregateCourseId is present, we construct a virtual path from the course structure
     const path: LearningPath | null = useMemo(() => {
         if (aggregateCourseId) {
             const course = db.COURSES.find(c => c.id === aggregateCourseId);
@@ -82,32 +87,30 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
                 mod.items.forEach((item, idx) => {
                     const stats = getClassNodeStatus(item.id, item.type, students, db);
                     
-                    // Determine Type & Color based on completion rate
                     let nodeType: 'theory' | 'practice' | 'challenge' = 'theory';
                     let titlePrefix = "";
                     
                     if (stats.rate < 50) {
-                        nodeType = 'challenge'; // Red (Danger/Stuck)
+                        nodeType = 'challenge';
                         titlePrefix = "⚠️ ";
                     } else if (stats.rate < 80) {
-                        nodeType = 'theory'; // Blue (In Progress)
+                        nodeType = 'theory'; 
                     } else {
-                        nodeType = 'practice'; // Green (Good)
+                        nodeType = 'practice';
                     }
 
-                    // Get real title
                     let realTitle = item.id;
                     if (item.type === 'lesson') realTitle = db.LESSONS[item.id]?.title || item.id;
                     else realTitle = db.ASSIGNMENTS[item.id]?.title || item.id;
 
                     virtualNodes.push({
                         id: item.id,
-                        title: `${titlePrefix}${realTitle.substring(0, 15)}...`, // Truncate for tree bubble
+                        title: `${titlePrefix}${realTitle.substring(0, 15)}...`,
                         description: `Class Completion: ${stats.rate.toFixed(0)}%`,
                         type: nodeType,
-                        isLocked: false, // Always visible for teacher
-                        isCompleted: stats.rate >= 80, // Gold border if done well
-                        flashcardsMastered: 0 // Dummy
+                        isLocked: false,
+                        isCompleted: stats.rate >= 80,
+                        flashcardsMastered: 0
                     });
                 });
             });
@@ -130,7 +133,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
             const anyCompleted = path.nodes.some(n => n.isCompleted);
             const hasSeenTour = localStorage.getItem('hasSeenGatekeeperTour');
             
-            // Trigger if: Not seen yet AND No progress made (start of journey)
             if (!hasSeenTour && !anyCompleted) {
                 setTimeout(() => setIsTourOpen(true), 1500);
             }
@@ -151,7 +153,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
         }
     ];
 
-    // --- THEME ADAPTATION FLOW (Flow 9) ---
     useEffect(() => {
         if (path && path.suggestedSkinId && user && !aggregateCourseId) {
             const currentSkinId = db.GAMIFICATION.equippedSkin;
@@ -176,27 +177,43 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
     };
 
     const handleNodeClick = (node: LearningNode, isLast: boolean) => {
-        // IF AGGREGATE VIEW: Show Class Stats
         if (aggregateCourseId) {
             const students = (Object.values(db.USERS) as User[]).filter(u => u.role === 'STUDENT');
-            // Re-calc stats to be sure or pass it through
-            // We need to know type to check progress again or store it in description?
-            // Let's re-infer type from node ID prefix usually used in mock data or search DB
             let type = 'lesson';
             if (db.ASSIGNMENTS[node.id]) type = 'assignment';
-            
             const stats = getClassNodeStatus(node.id, type, students, db);
             setSelectedAggregateNode({ node, stats });
             return;
         }
 
-        // NORMAL VIEW
         if (node.type === 'secret') {
             setSelectedSecretNode(node);
             setIsTreasureOpen(true);
         } else {
             navigate('learning_node_study', { pathId: path!.id, nodeId: node.id, isLastNode: isLast });
         }
+    };
+
+    // --- MANUAL NODE ADD HANDLER ---
+    const handleAddManualNode = () => {
+        if (!path || !newNodeTitle.trim()) return;
+        
+        const newNode: LearningNode = {
+            id: `manual_node_${Date.now()}`,
+            title: newNodeTitle,
+            description: newNodeDesc || "Thêm thủ công",
+            type: newNodeType,
+            isLocked: true, // New nodes are locked by default
+            isCompleted: false,
+            flashcardsMastered: 0
+        };
+
+        // Use extendLearningPath to add the node
+        extendLearningPath(path.id, [newNode]);
+        setIsAddNodeModalOpen(false);
+        setNewNodeTitle('');
+        setNewNodeDesc('');
+        alert("Đã thêm bài học mới vào cuối lộ trình!");
     };
 
     if (!path) {
@@ -206,6 +223,9 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
     const allCompleted = path.nodes.every(n => n.isCompleted);
     const anyCompleted = path.nodes.some(n => n.isCompleted);
     const completedNodeTitles = path.nodes.filter(n => n.isCompleted).map(n => n.title);
+    
+    // Check if user is creator
+    const isCreator = user?.id === path.creatorId;
 
     return (
         <div className="max-w-4xl mx-auto space-y-6 relative">
@@ -219,7 +239,15 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
 
                 {!aggregateCourseId && (
                     <div className="flex gap-2">
-                        {/* SPEED RUN BUTTON */}
+                        {isCreator && (
+                            <button 
+                                onClick={() => setIsAddNodeModalOpen(true)}
+                                className="group flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-900/30 border border-indigo-500/50 text-indigo-200 hover:bg-indigo-600 hover:text-white hover:border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.4)] transition-all duration-300"
+                            >
+                                <span className="text-xl">➕</span> <span className="font-bold">Thêm Bài Thủ Công</span>
+                            </button>
+                        )}
+
                         {anyCompleted && (
                             <button 
                                 onClick={() => setIsSpeedRunOpen(true)}
@@ -230,7 +258,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
                             </button>
                         )}
 
-                        {/* GATEKEEPER BUTTON */}
                         {!allCompleted && (
                             <button 
                                 id="btn-gatekeeper"
@@ -262,6 +289,48 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
                 <DuolingoTree nodes={path.nodes} onNodeClick={handleNodeClick} allowInteraction={!!aggregateCourseId} />
             </div>
 
+            {/* MODAL: ADD MANUAL NODE */}
+            <Modal isOpen={isAddNodeModalOpen} onClose={() => setIsAddNodeModalOpen(false)} title="Thêm Bài Học Thủ Công" size="md">
+                <div className="space-y-4 p-2">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-300 mb-1">Tiêu đề bài học</label>
+                        <input 
+                            type="text" 
+                            className="form-input w-full" 
+                            value={newNodeTitle}
+                            onChange={(e) => setNewNodeTitle(e.target.value)}
+                            placeholder="VD: Từ vựng Bài 1"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-300 mb-1">Mô tả ngắn</label>
+                        <input 
+                            type="text" 
+                            className="form-input w-full" 
+                            value={newNodeDesc}
+                            onChange={(e) => setNewNodeDesc(e.target.value)}
+                            placeholder="VD: Học 10 từ mới về gia đình"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-300 mb-1">Loại bài học</label>
+                        <select 
+                            className="form-select w-full bg-gray-900" 
+                            value={newNodeType} 
+                            onChange={(e) => setNewNodeType(e.target.value as any)}
+                        >
+                            <option value="theory">📖 Lý thuyết (Màu xanh)</option>
+                            <option value="practice">✏️ Thực hành (Màu lục)</option>
+                            <option value="challenge">👹 Thử thách (Màu đỏ)</option>
+                        </select>
+                    </div>
+                    <div className="flex justify-end pt-4 gap-2">
+                        <button onClick={() => setIsAddNodeModalOpen(false)} className="btn btn-secondary">Hủy</button>
+                        <button onClick={handleAddManualNode} className="btn btn-primary" disabled={!newNodeTitle.trim()}>Lưu & Thêm</button>
+                    </div>
+                </div>
+            </Modal>
+
             <GatekeeperModal 
                 isOpen={isGatekeeperOpen}
                 onClose={() => setIsGatekeeperOpen(false)}
@@ -288,7 +357,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
                 />
             )}
 
-            {/* CLASS STATS MODAL (For Aggregate View) */}
             {selectedAggregateNode && (
                 <Modal isOpen={!!selectedAggregateNode} onClose={() => setSelectedAggregateNode(null)} title="📊 Thống kê Lớp học" size="sm">
                     <div className="text-center space-y-4 p-4">
@@ -322,7 +390,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
                 </Modal>
             )}
 
-            {/* THEME ADAPTATION MODAL */}
             {suggestedSkin && (
                 <Modal isOpen={isSkinPromptOpen} onClose={() => setIsSkinPromptOpen(false)} title="🎨 Gợi ý Trang bị" size="sm">
                     <div className="text-center space-y-4 py-2">
@@ -358,7 +425,6 @@ const LearningPathDetailPage: React.FC<LearningPathDetailPageProps> = ({ pathId 
                 </Modal>
             )}
 
-            {/* --- ONBOARDING TOUR --- */}
             <OnboardingTour 
                 steps={tourSteps} 
                 isOpen={isTourOpen} 

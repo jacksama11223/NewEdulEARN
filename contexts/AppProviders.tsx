@@ -354,6 +354,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     ...prev,
                     LESSONS: { ...prev.LESSONS, [lesson.id]: lesson }
                 }));
+            } else if (payload.type === 'GROUP') {
+                // Update group list if a new group is created or updated
+                const group = payload.data;
+                updateDb(prev => {
+                    const exists = prev.STUDY_GROUPS.some(g => g.id === group.id);
+                    let newGroups = prev.STUDY_GROUPS;
+                    if (exists) {
+                        newGroups = prev.STUDY_GROUPS.map(g => g.id === group.id ? group : g);
+                    } else {
+                        newGroups = [...prev.STUDY_GROUPS, group];
+                    }
+                    return { ...prev, STUDY_GROUPS: newGroups };
+                });
             }
         });
 
@@ -377,14 +390,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Ensure socket joins group rooms whenever 'db.STUDY_GROUPS' changes (loaded from API)
     useEffect(() => {
         if (socket && currentUserId && db.STUDY_GROUPS) {
+            const currentUser = db.USERS[currentUserId];
+            // Admin and Teacher must join ALL groups to see realtime messages even if not a direct member
+            const shouldMonitorAll = currentUser?.role === 'ADMIN' || currentUser?.role === 'TEACHER';
+
             db.STUDY_GROUPS.forEach(g => {
-                if (g.members.includes(currentUserId)) {
+                if (shouldMonitorAll || g.members.includes(currentUserId)) {
                     // console.log(`🛰️ Joining room for group: ${g.name} (${g.id})`);
                     socket.emit('join_group', g.id);
                 }
             });
         }
-    }, [socket, currentUserId, db.STUDY_GROUPS]);
+    }, [socket, currentUserId, db.STUDY_GROUPS, db.USERS]);
 
 
     const fetchDueFlashcards = async (userId: string) => {

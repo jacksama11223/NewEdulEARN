@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef, ReactNode } from 'react';
 import { MOCK_DATA } from '../data/mockData';
-import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson, ModuleItem, Module } from '../types';
+import { Database, User, ServiceStatus, MockTestResultStatus, FeatureFlag, Flashcard, LearningNode, QuizQuestion, GeneratedModule, PersonalNote, SpaceJunk, ShopItem, FlashcardDeck, Task, Notification, Announcement, StudyGroup, GroupChatMessage, LearningPath, Course, ChatMessage, Assignment, Quiz, QuizSubmission, CourseStructure, Lesson, ModuleItem, Module, FileSubmission } from '../types';
 import { io, Socket } from 'socket.io-client';
 import { generateLegacyArchiveContent } from '../services/geminiService';
 
@@ -367,6 +367,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }
                     return { ...prev, STUDY_GROUPS: newGroups };
                 });
+            } else if (payload.type === 'FILE_SUBMISSION') {
+                const sub = payload.data;
+                updateDb(prev => {
+                    const subs = prev.FILE_SUBMISSIONS[sub.assignmentId] || [];
+                    const updatedSubs = subs.filter(s => s.studentId !== sub.studentId);
+                    return {
+                        ...prev,
+                        FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [sub.assignmentId]: [...updatedSubs, sub] }
+                    };
+                });
+            } else if (payload.type === 'QUIZ_SUBMISSION') {
+                const sub = payload.data;
+                updateDb(prev => ({
+                    ...prev,
+                    QUIZ_SUBMISSIONS: {
+                        ...prev.QUIZ_SUBMISSIONS,
+                        [sub.quizId]: {
+                            ...prev.QUIZ_SUBMISSIONS[sub.quizId],
+                            [sub.studentId]: sub
+                        }
+                    }
+                }));
             }
         });
 
@@ -626,7 +648,39 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }
             } catch (err) { console.error("Group chat fetch error", err); }
             
-            // 8. Update SRS counts immediately
+            // 8. Fetch File Submissions (NEW)
+            try {
+                const fileSubsRes = await fetch(`${BACKEND_URL}/file-submissions`);
+                if (fileSubsRes.ok) {
+                    const fileSubsArr: FileSubmission[] = await fileSubsRes.json();
+                    const fileSubsMap: Record<string, FileSubmission[]> = {};
+                    
+                    fileSubsArr.forEach(sub => {
+                        if (!fileSubsMap[sub.assignmentId]) fileSubsMap[sub.assignmentId] = [];
+                        fileSubsMap[sub.assignmentId].push(sub);
+                    });
+
+                    updateDb(prev => ({ ...prev, FILE_SUBMISSIONS: fileSubsMap }));
+                }
+            } catch (e) { console.error("File Submissions fetch error", e); }
+
+            // 9. Fetch Quiz Submissions (NEW)
+            try {
+                const quizSubsRes = await fetch(`${BACKEND_URL}/quiz-submissions`);
+                if (quizSubsRes.ok) {
+                    const quizSubsArr: any[] = await quizSubsRes.json();
+                    const quizSubsMap: Record<string, Record<string, QuizSubmission>> = {};
+
+                    quizSubsArr.forEach(sub => {
+                        if (!quizSubsMap[sub.quizId]) quizSubsMap[sub.quizId] = {};
+                        quizSubsMap[sub.quizId][sub.studentId] = sub;
+                    });
+
+                    updateDb(prev => ({ ...prev, QUIZ_SUBMISSIONS: quizSubsMap }));
+                }
+            } catch (e) { console.error("Quiz Submissions fetch error", e); }
+
+            // 10. Update SRS counts immediately
             fetchDueFlashcards(userId);
 
         } catch (e) {
@@ -657,26 +711,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     // ... Implementation of other methods (simplified for fix) ...
-    // Note: In a real app these would call API endpoints. Here we update mock DB.
     
-    const submitFileAssignment = (assignmentId: string, studentId: string, fileName: string) => {
+    const submitFileAssignment = async (assignmentId: string, studentId: string, fileName: string) => {
+        const newSub: FileSubmission = {
+            id: `sub_${Date.now()}`,
+            assignmentId: assignmentId, // Important for backend model
+            studentId,
+            studentName: db.USERS[studentId]?.name || 'Student',
+            status: 'Đã nộp' as const,
+            grade: null,
+            feedback: null,
+            fileName,
+            timestamp: new Date().toISOString()
+        };
+
+        // Optimistic UI Update
         updateDb(prev => {
             const subs = prev.FILE_SUBMISSIONS[assignmentId] || [];
-            const newSub = {
-                id: `sub_${Date.now()}`,
-                studentId,
-                studentName: prev.USERS[studentId]?.name || 'Student',
-                status: 'Đã nộp' as const,
-                grade: null,
-                feedback: null,
-                fileName,
-                timestamp: new Date().toISOString()
-            };
+            // Remove previous submission if exists to simulate update/overwrite locally
+            const updatedSubs = subs.filter(s => s.studentId !== studentId);
             return {
                 ...prev,
-                FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [assignmentId]: [...subs, newSub] }
+                FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [assignmentId]: [...updatedSubs, newSub] }
             };
         });
+
+        // Persist to Backend
+        try {
+            await fetch(`${BACKEND_URL}/file-submissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newSub)
+            });
+        } catch (e) {
+            console.error("Submit File API Failed", e);
+        }
     };
 
     const gradeFileSubmission = (assignmentId: string, studentId: string, grade: number, feedback: string) => {
@@ -690,9 +759,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
     };
 
-    const submitQuiz = (quizId: string, userId: string, answers: Record<string, number>) => {
-        // Mock score calc would happen here or backend
-        // For simplicity, we just store it
+    const submitQuiz = async (quizId: string, userId: string, answers: Record<string, number>) => {
         const quiz = db.QUIZZES[quizId];
         let score = 0;
         if(quiz) {
@@ -701,22 +768,38 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             });
         }
         
+        const submissionData = {
+            quizId,
+            studentId: userId,
+            score,
+            total: quiz?.questions.length || 0,
+            percentage: quiz?.questions.length ? (score/quiz.questions.length)*100 : 0,
+            timestamp: new Date().toISOString(),
+            answers
+        };
+
+        // Optimistic UI
         updateDb(prev => ({
             ...prev,
             QUIZ_SUBMISSIONS: {
                 ...prev.QUIZ_SUBMISSIONS,
                 [quizId]: {
                     ...prev.QUIZ_SUBMISSIONS[quizId],
-                    [userId]: {
-                        score,
-                        total: quiz?.questions.length || 0,
-                        percentage: quiz?.questions.length ? (score/quiz.questions.length)*100 : 0,
-                        timestamp: new Date().toISOString(),
-                        answers
-                    }
+                    [userId]: submissionData
                 }
             }
         }));
+
+        // Persist to Backend
+        try {
+            await fetch(`${BACKEND_URL}/quiz-submissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(submissionData)
+            });
+        } catch (e) {
+            console.error("Submit Quiz API Failed", e);
+        }
     };
 
     // Placeholder implementations for other methods to satisfy interface
@@ -1071,17 +1154,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (res.ok) {
                 const group: StudyGroup = await res.json();
                 
-                // --- FIX: XÓA PHẦN TỰ CẬP NHẬT Ở ĐÂY ---
-                // Chúng ta sẽ dựa vào sự kiện socket 'db_update' từ server gửi về để cập nhật UI.
-                // Nếu giữ lại dòng dưới đây, UI sẽ hiển thị 2 nhóm (1 do hàm này thêm, 1 do socket thêm).
-                
-                /* 
-                updateDb(prev => ({
-                    ...prev,
-                    STUDY_GROUPS: [...prev.STUDY_GROUPS, group]
-                }));
-                */
-
                 // Join the socket room for real-time updates
                 if (socket) socket.emit('join_group', group.id);
             } else {

@@ -13,8 +13,9 @@ import GroupMessage from '../models/GroupMessage.js';
 import LearningPath from '../models/LearningPath.js';
 import Quiz from '../models/Quiz.js';
 import QuizSubmission from '../models/QuizSubmission.js';
+import FileSubmission from '../models/FileSubmission.js'; // NEW IMPORT
 import User from '../models/User.js';
-import FlashcardDeck from '../models/FlashcardDeck.js'; // NEW IMPORT
+import FlashcardDeck from '../models/FlashcardDeck.js';
 
 const router = express.Router();
 
@@ -158,6 +159,9 @@ router.post('/quizzes', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
+// --- SUBMISSIONS (FILE & QUIZ) ---
+
+// Get ALL Quiz Submissions
 router.get('/quiz-submissions', async (req, res) => {
     try {
         const subs = await QuizSubmission.find({});
@@ -165,14 +169,41 @@ router.get('/quiz-submissions', async (req, res) => {
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
 
+// Submit Quiz
 router.post('/quiz-submissions', async (req, res) => {
     try {
         const { quizId, studentId } = req.body;
+        // Upsert logic: Delete old, create new to keep simple, or findOneAndUpdate
         await QuizSubmission.deleteOne({ quizId, studentId });
+        
         const sub = await QuizSubmission.create(req.body);
-        // Only notify the teacher and the student (optimized), but for now broadcast to keep simple
+        
         if (req.io) {
             req.io.emit('db_update', { type: 'QUIZ_SUBMISSION', data: sub });
+        }
+        res.status(201).json(sub);
+    } catch (error) { res.status(400).json({ message: error.message }); }
+});
+
+// NEW: Get ALL File Submissions
+router.get('/file-submissions', async (req, res) => {
+    try {
+        const subs = await FileSubmission.find({});
+        res.json(subs);
+    } catch (error) { res.status(500).json({ message: error.message }); }
+});
+
+// NEW: Submit File Assignment
+router.post('/file-submissions', async (req, res) => {
+    try {
+        const { assignmentId, studentId } = req.body;
+        // Upsert
+        await FileSubmission.deleteOne({ assignmentId, studentId });
+        
+        const sub = await FileSubmission.create(req.body);
+        
+        if (req.io) {
+            req.io.emit('db_update', { type: 'FILE_SUBMISSION', data: sub });
         }
         res.status(201).json(sub);
     } catch (error) { res.status(400).json({ message: error.message }); }
@@ -195,7 +226,6 @@ router.post('/notes', async (req, res) => {
 
 router.put('/notes/:id', async (req, res) => {
     try {
-        // FIXED: Use findOneAndUpdate with the custom 'id' field instead of findByIdAndUpdate (which uses _id)
         const note = await PersonalNote.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
         if (!note) {
             return res.status(404).json({ message: "Note not found" });
@@ -206,7 +236,6 @@ router.put('/notes/:id', async (req, res) => {
 
 router.delete('/notes/:id', async (req, res) => {
     try {
-        // FIXED: Use findOneAndDelete with the custom 'id' field
         const note = await PersonalNote.findOneAndDelete({ id: req.params.id });
         if (!note) {
             return res.status(404).json({ message: "Note not found" });
@@ -232,9 +261,6 @@ router.post('/tasks', async (req, res) => {
 
 router.put('/tasks/:id', async (req, res) => {
     try {
-        // Assuming Task might use _id if not specified otherwise, but for consistency if using custom id:
-        // const task = await Task.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
-        // Keeping original logic if Tasks don't have custom string ID in schema, otherwise update:
         const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
         res.json(task);
     } catch (error) { res.status(400).json({ message: error.message }); }
@@ -292,12 +318,9 @@ router.put('/groups/:id/join', async (req, res) => {
             { $addToSet: { members: userId } },
             { new: true }
         );
-        
-        // FIX: Notify all users about group update (member list change)
         if (req.io) {
             req.io.emit('db_update', { type: 'GROUP', data: group });
         }
-
         res.json(group);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -368,7 +391,6 @@ router.post('/paths', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
-// FIX: New Endpoint to Assign Paths to Multiple Students
 router.post('/paths/assign', async (req, res) => {
     try {
         const { teacherName, studentIds, pathData } = req.body;
@@ -377,25 +399,21 @@ router.post('/paths/assign', async (req, res) => {
         for (const studentId of studentIds) {
             const newPathData = {
                 ...pathData,
-                id: `lp_assign_${Date.now()}_${studentId}`, // Unique ID per student
-                creatorId: studentId, // Student becomes the owner to track their progress
+                id: `lp_assign_${Date.now()}_${studentId}`,
+                creatorId: studentId,
                 createdAt: new Date()
             };
             
             const newPath = await LearningPath.create(newPathData);
             createdPaths.push(newPath);
 
-            // Notify Student
             if (req.io) {
-                // 1. Send Notification
                 req.io.to(studentId).emit('receive_notification', {
                     id: `notif_assign_${Date.now()}`,
                     text: `👨‍🏫 Giáo viên ${teacherName} đã giao cho bạn lộ trình: "${newPathData.title}"`,
                     type: 'assignment',
                     timestamp: new Date()
                 });
-                
-                // 2. Push Update directly so it appears in list without refresh
                 req.io.to(studentId).emit('learning_path_assigned', newPath);
             }
         }
@@ -443,15 +461,12 @@ router.delete('/decks/:id', async (req, res) => {
 });
 
 // --- SRS REVIEW SYSTEM ---
-
-// Get OVERDUE cards (for Smart Widget)
 router.get('/reviews/due/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
         const now = Date.now();
         const dueCards = [];
 
-        // 1. Fetch from standalone Decks
         const decks = await FlashcardDeck.find({ userId });
         decks.forEach(deck => {
             deck.cards.forEach(card => {
@@ -466,7 +481,6 @@ router.get('/reviews/due/:userId', async (req, res) => {
             });
         });
 
-        // 2. Fetch from Learning Paths
         const paths = await LearningPath.find({ creatorId: userId });
         paths.forEach(path => {
             path.nodes.forEach(node => {
@@ -487,14 +501,12 @@ router.get('/reviews/due/:userId', async (req, res) => {
         });
         
         dueCards.sort((a, b) => a.nextReview - b.nextReview);
-
         res.json(dueCards);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 });
 
-// NEW: Get UPCOMING reviews (Paged)
 router.get('/reviews/upcoming/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
@@ -504,7 +516,6 @@ router.get('/reviews/upcoming/:userId', async (req, res) => {
 
         let allCards = [];
 
-        // 1. From Decks
         const decks = await FlashcardDeck.find({ userId });
         decks.forEach(deck => {
             deck.cards.forEach(card => {
@@ -517,7 +528,6 @@ router.get('/reviews/upcoming/:userId', async (req, res) => {
             });
         });
 
-        // 2. From Paths
         const paths = await LearningPath.find({ creatorId: userId });
         paths.forEach(path => {
             path.nodes.forEach(node => {
@@ -534,7 +544,6 @@ router.get('/reviews/upcoming/:userId', async (req, res) => {
             });
         });
 
-        // Sort by nextReview (Nearest first)
         allCards.sort((a, b) => a.nextReview - b.nextReview);
 
         const total = allCards.length;
@@ -552,12 +561,9 @@ router.get('/reviews/upcoming/:userId', async (req, res) => {
     }
 });
 
-// Record review result (OPTIMIZED SRS ALGORITHM)
 router.post('/reviews/record', async (req, res) => {
     try {
         const { cardId, rating, sourceType, sourceId, nodeId } = req.body;
-        // rating: 'easy', 'medium', 'hard'
-        
         const now = Date.now();
         const ONE_MINUTE = 60 * 1000;
         const ONE_HOUR = 60 * ONE_MINUTE;
@@ -566,7 +572,6 @@ router.post('/reviews/record', async (req, res) => {
         let doc;
         let cardList;
         
-        // Fetch Source
         if (sourceType === 'deck') {
             doc = await FlashcardDeck.findOne({ id: sourceId });
             cardList = doc.cards;
@@ -585,30 +590,21 @@ router.post('/reviews/record', async (req, res) => {
         let newBox = card.box || 0; 
         let interval = 0;
 
-        // --- OPTIMIZED ANKI-STYLE ALGORITHM ---
-        
         if (rating === 'hard') {
             newBox = 0; 
-            interval = 1 * ONE_MINUTE; // Reset: 1 min
+            interval = 1 * ONE_MINUTE; 
         } else if (rating === 'medium') {
-            // Struggle but correct: Keep box or slightly reduce, short interval
             newBox = Math.max(0, newBox - 1);
-            interval = 10 * ONE_MINUTE; // 10 mins
+            interval = 10 * ONE_MINUTE; 
         } else { 
-            // Easy
             newBox = newBox + 1;
-            
-            // Learning Steps (Short term)
-            if (newBox === 1) interval = 10 * ONE_MINUTE;      // Step 1: 10 mins
-            else if (newBox === 2) interval = 1 * ONE_HOUR;    // Step 2: 1 hour
-            else if (newBox === 3) interval = 5 * ONE_HOUR;    // Step 3: 5 hours
-            
-            // Graduated Steps (Long term)
-            else if (newBox === 4) interval = 1 * ONE_DAY;     // Graduated: 1 day
-            else if (newBox === 5) interval = 3 * ONE_DAY;     // 3 days
-            else if (newBox === 6) interval = 7 * ONE_DAY;     // 1 week
+            if (newBox === 1) interval = 10 * ONE_MINUTE;
+            else if (newBox === 2) interval = 1 * ONE_HOUR;
+            else if (newBox === 3) interval = 5 * ONE_HOUR;
+            else if (newBox === 4) interval = 1 * ONE_DAY;
+            else if (newBox === 5) interval = 3 * ONE_DAY;
+            else if (newBox === 6) interval = 7 * ONE_DAY;
             else {
-                // Exponential Growth for long term
                 const days = 7 * Math.pow(2, newBox - 6);
                 interval = days * ONE_DAY;
             }

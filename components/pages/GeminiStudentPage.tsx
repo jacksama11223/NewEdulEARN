@@ -276,7 +276,7 @@ const GeminiStudentPage: React.FC = () => {
         if (!apiKey) { setError("Thiếu API Key."); return; }
         setConvertingId(`fc-${msgIndex}`);
         try {
-            const cards = await convertContentToFlashcards(apiKey, text);
+            const cards = await convertContentToFlashcards(apiKey, text, {});
             if (cards && cards.length > 0) {
                 createFlashcardDeck(`AI Generated Deck ${new Date().toLocaleTimeString()}`, cards);
                 alert(`🃏 Đã thêm bộ thẻ "${cards.length} thuật ngữ" vào kho!`);

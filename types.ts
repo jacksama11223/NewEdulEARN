@@ -72,6 +72,7 @@ export interface Quiz {
 
 export interface FileSubmission {
   id: string;
+  assignmentId: string;
   studentId: string;
   studentName: string;
   status: 'Chưa nộp' | 'Đã nộp';

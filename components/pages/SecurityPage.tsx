@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react';
-import { DataContext, PageContext } from '../../contexts/AppProviders';
+import { DataContext, PageContext, AuthContext } from '../../contexts/AppProviders';
 import type { WafLog } from '../../types';
 
 const SecurityPage: React.FC = () => {
-    const { db, toggleUserLock, sendAnnouncement } = useContext(DataContext)!;
+    const { user: currentUser } = useContext(AuthContext)!;
+    const { db, toggleUserLock, deleteUser, sendAnnouncement } = useContext(DataContext)!;
     const { navigate } = useContext(PageContext)!;
     const [wafLogs, setWafLogs] = useState<WafLog[]>(() => db.WAF_LOGS || []);
     const [announcement, setAnnouncement] = useState('');
@@ -30,6 +31,12 @@ const SecurityPage: React.FC = () => {
         setAnnouncement('');
         alert("Đã gửi thông báo!");
     }, [announcement, sendAnnouncement]);
+
+    const handleDelete = (userId: string) => {
+        if (window.confirm(`Bạn có chắc chắn muốn xóa người dùng ${userId}? Hành động này không thể hoàn tác.`)) {
+            deleteUser(userId);
+        }
+    };
 
     const users = useMemo(() => Object.values(db.USERS), [db.USERS]);
 
@@ -57,7 +64,14 @@ const SecurityPage: React.FC = () => {
                                     <td className="p-3 font-mono text-sm">{user.id}</td>
                                     <td className="p-3">{user.name}</td><td className="p-3">{user.role}</td>
                                     <td className="p-3 text-center"><span className={`px-2 py-1 text-xs rounded-full ${user.isLocked ? 'bg-red-800 text-red-300' : 'bg-green-800 text-green-300'}`}>{user.isLocked ? 'Đã khóa' : 'Hoạt động'}</span></td>
-                                    <td className="p-3">{user.role !== 'ADMIN' && <button type="button" onClick={() => toggleUserLock(user.id)} className={`btn text-sm ${user.isLocked ? 'btn-primary' : 'btn-secondary border border-red-700 text-red-400'}`}>{user.isLocked ? '🔓 Mở khóa' : '🔒 Khóa'}</button>}</td>
+                                    <td className="p-3 flex gap-2">
+                                        {user.role !== 'ADMIN' && (
+                                            <>
+                                                <button type="button" onClick={() => toggleUserLock(user.id)} className={`btn text-sm ${user.isLocked ? 'btn-primary' : 'btn-secondary border border-red-700 text-red-400'}`}>{user.isLocked ? '🔓 Mở khóa' : '🔒 Khóa'}</button>
+                                                <button type="button" onClick={() => handleDelete(user.id)} className="btn text-sm btn-secondary border border-red-900 text-red-500 hover:bg-red-900/50">🗑️ Xóa</button>
+                                            </>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

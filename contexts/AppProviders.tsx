@@ -34,6 +34,9 @@ export interface AuthContextType {
 
 export interface DataContextType {
     db: Database;
+    unreadCounts: { chat: number; group: number; alert: number }; // NEW
+    resetUnreadCount: (type: 'chat' | 'group' | 'alert') => void; // NEW
+    
     // NEW: Method to sync user data immediately after login to prevent white screen
     syncUserToDb: (user: User) => void; 
 
@@ -48,6 +51,7 @@ export interface DataContextType {
     deleteVideoNote: (lessonId: string, noteId: string) => void;
     runMockTest: (type: 'unit' | 'integration' | 'e2e') => void;
     toggleUserLock: (userId: string) => void;
+    deleteUser: (userId: string) => void; 
     sendAnnouncement: (text: string) => void;
     unlockAllUsers: () => void;
     registerUser: (u: string, p: string, name: string, role: any) => Promise<void>;
@@ -99,7 +103,7 @@ export interface DataContextType {
 
     // Learning Path
     createLearningPath: (userId: string, title: string, topic: string, nodes: LearningNode[], meta: any, wagerAmount?: number) => Promise<string>;
-    assignLearningPath: (teacherName: string, studentIds: string[], pathData: any) => Promise<void>; // Updated signature
+    assignLearningPath: (teacherName: string, studentIds: string[], pathData: any) => Promise<void>; 
     updateNodeProgress: (pathId: string, nodeId: string, data: Partial<LearningNode>) => void;
     unlockNextNode: (pathId: string, nodeId: string) => void;
     extendLearningPath: (pathId: string, newNodes: LearningNode[]) => void;
@@ -107,7 +111,7 @@ export interface DataContextType {
 
     // Tasks
     addTask: (userId: string, text: string) => void;
-    toggleTaskCompletion: (taskId: string, isCompleted: boolean) => void; // NEW
+    toggleTaskCompletion: (taskId: string, isCompleted: boolean) => void; 
     deleteTask: (taskId: string) => void;
     archiveCompletedTasks: (userId: string) => void;
 
@@ -120,7 +124,7 @@ export interface DataContextType {
     generateArchive: (apiKey: string, type: 'course'|'squadron', id: string, name: string) => Promise<string>;
     addCommunityQuestion: (userId: string, nodeId: string, question: QuizQuestion) => void;
     addLessonToCourse: (courseId: string, title: string, content: string) => void;
-    editLessonContent: (lessonId: string, newContent: string) => void; // ADDED
+    editLessonContent: (lessonId: string, newContent: string) => void; 
     updateCourseSettings: (courseId: string, settings: Partial<Course>) => void;
     fetchUserData: (userId: string) => Promise<void>;
 }
@@ -173,6 +177,7 @@ export const PetContext = createContext<PetContextType | null>(null);
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [db, setDb] = useState<Database>(MOCK_DATA);
     const [pdfStorage, setPdfStorage] = useState<Record<string, File>>({});
+    const [unreadCounts, setUnreadCounts] = useState({ chat: 0, group: 0, alert: 0 }); // NEW
     
     // --- REAL-TIME SOCKET CONNECTION ---
     const [socket, setSocket] = useState<Socket | null>(null);
@@ -181,6 +186,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     useEffect(() => {
         fetchGlobalData();
     }, []);
+
+    const resetUnreadCount = (type: 'chat' | 'group' | 'alert') => {
+        setUnreadCounts(prev => ({ ...prev, [type]: 0 }));
+    };
+
+    const playNotificationSound = () => {
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+        audio.volume = 0.5;
+        audio.play().catch(e => console.log("Audio play blocked (user interaction needed)", e));
+    };
 
     // --- GLOBAL DATA FETCHING ---
     const fetchGlobalData = useCallback(async () => {
@@ -288,6 +303,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             // Listen for 1-on-1 Messages
             newSocket.on('receive_message', (msg: ChatMessage) => {
+                playNotificationSound();
+                setUnreadCounts(prev => ({ ...prev, chat: prev.chat + 1 }));
                 setDb(prev => {
                     const key = [msg.from, msg.to].sort().join('_');
                     const existingMsgs = prev.CHAT_MESSAGES[key] || [];
@@ -305,6 +322,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             // Listen for Group Messages
             newSocket.on('receive_group_message', (msg: GroupChatMessage) => {
+                playNotificationSound();
+                setUnreadCounts(prev => ({ ...prev, group: prev.group + 1 }));
                 setDb(prev => {
                     const existingMsgs = prev.GROUP_CHAT_MESSAGES[msg.groupId] || [];
                     if (existingMsgs.some(m => m.id === msg.id)) return prev; // Dedupe
@@ -313,6 +332,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         GROUP_CHAT_MESSAGES: {
                             ...prev.GROUP_CHAT_MESSAGES,
                             [msg.groupId]: [...existingMsgs, { ...msg, timestamp: new Date(msg.timestamp) }] // Fix date string
+                        }
+                    };
+                });
+            });
+
+            // Listen for General Notifications (Assignments, Announcements)
+            newSocket.on('receive_notification', (notif: Notification) => {
+                playNotificationSound();
+                setUnreadCounts(prev => ({ ...prev, alert: prev.alert + 1 }));
+                setDb(prev => {
+                    const currentNotifs = prev.NOTIFICATIONS[user.id] || [];
+                    return {
+                        ...prev,
+                        NOTIFICATIONS: {
+                            ...prev.NOTIFICATIONS,
+                            [user.id]: [notif, ...currentNotifs]
                         }
                     };
                 });
@@ -480,6 +515,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     const toggleUserLock = (userId: string) => {
         setDb(prev => ({ ...prev, USERS: { ...prev.USERS, [userId]: { ...prev.USERS[userId], isLocked: !prev.USERS[userId].isLocked } } }));
+    };
+    const deleteUser = async (userId: string) => {
+        try {
+            await fetch(`${BACKEND_URL}/users/${userId}`, { method: 'DELETE' });
+            setDb(prev => {
+                const newUsers = { ...prev.USERS };
+                delete newUsers[userId];
+                return { ...prev, USERS: newUsers };
+            });
+        } catch (e) { console.error("Failed to delete user", e); }
     };
     const sendAnnouncement = (text: string) => {
         setDb(prev => ({ ...prev, ANNOUNCEMENTS: [{ id: `ann_${Date.now()}`, text, timestamp: new Date() }, ...prev.ANNOUNCEMENTS] }));
@@ -749,9 +794,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const id = `lp_${Date.now()}_${studentId}`;
             const assignedPath = { ...pathData, id, creatorId: studentId, createdAt: new Date().toISOString() };
             newPaths[id] = assignedPath;
+            // No need to manually add notification here as backend emits it now
+            // But we update local DB optimistically
             const notif: Notification = { id: `n_assign_${Date.now()}_${studentId}`, text: `👨‍🏫 Giáo viên ${teacherName} đã giao lộ trình học tập mới: "${pathData.title}"`, read: false, type: 'system', timestamp: new Date().toISOString() };
             const currentNotifs = newNotifs[studentId] || [];
             newNotifs[studentId] = [notif, ...currentNotifs];
+            
             try { await fetch(`${BACKEND_URL}/paths`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(assignedPath) }); } catch (e) { console.error(`Failed to assign path to ${studentId}:`, e); }
         });
         await Promise.all(promises);
@@ -920,8 +968,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return (
         <DataContext.Provider value={{
-            db, syncUserToDb, setApiKey, markLessonComplete, submitFileAssignment, gradeFileSubmission, submitQuiz, updateQuizQuestions,
-            addDiscussionPost, addVideoNote, deleteVideoNote, runMockTest, toggleUserLock, sendAnnouncement, unlockAllUsers,
+            db, syncUserToDb, unreadCounts, resetUnreadCount, // Exported new context values
+            setApiKey, markLessonComplete, submitFileAssignment, gradeFileSubmission, submitQuiz, updateQuizQuestions,
+            addDiscussionPost, addVideoNote, deleteVideoNote, runMockTest, toggleUserLock, deleteUser, sendAnnouncement, unlockAllUsers,
             registerUser, completeOnboarding, dismissAnnouncement, markNotificationRead, buyShopItem, equipShopItem, equipPet,
             checkDailyDiamondReward, unlockSecretReward, collectSpaceJunk, recycleSpaceJunk, awardXP, restoreStreak,
             recordSpeedRunResult, sendChatMessage, sendGroupMessage, joinGroup, createGroup, createRaidParty, resolveSOS, processTrade,

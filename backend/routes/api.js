@@ -55,6 +55,25 @@ router.get('/users', async (req, res) => {
     }
 });
 
+router.delete('/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = await User.findOneAndDelete({ id });
+        
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Optional: Cascade delete related data if needed
+        // await PersonalNote.deleteMany({ userId: id });
+        // await Task.deleteMany({ userId: id });
+
+        res.json({ message: "User deleted successfully", id });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 // --- AI ---
 router.post('/ai/generate', generateText);
 router.post('/ai/generate-json', generateJson);
@@ -300,6 +319,21 @@ router.get('/paths/:userId', async (req, res) => {
 router.post('/paths', async (req, res) => {
     try {
         const path = await LearningPath.create(req.body);
+        
+        // REAL-TIME NOTIFICATION LOGIC
+        // If creatorId (user) is assigned this path by a teacher (implied if creator != teacher? No, simple logic: check if context says 'assign')
+        // In this app, assignLearningPath from frontend creates path with creatorId = studentId.
+        // We can just emit to creatorId. If creatorId is logged in, they get a notif.
+        
+        if (req.io) {
+            req.io.to(req.body.creatorId).emit('receive_notification', {
+                id: `notif_${Date.now()}`,
+                text: `🔔 Bạn có lộ trình học tập mới: "${req.body.title}"`,
+                type: 'assignment',
+                timestamp: new Date()
+            });
+        }
+
         res.status(201).json(path);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });

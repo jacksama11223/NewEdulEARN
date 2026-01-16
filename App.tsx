@@ -161,13 +161,22 @@ const FloatingWidget: React.FC<{ children: React.ReactNode; initialPos: { x: num
 const Navigation: React.FC = () => {
   const { user } = useContext(AuthContext)!;
   const { page, setPage, deepWorkMode } = useContext(GlobalStateContext)!;
+  const { unreadCounts, resetUnreadCount } = useContext(DataContext)!; // NEW: Get Unread Counts
   const { navigate } = useContext(PageContext)!;
   const { triggerReaction } = useContext(PetContext)!;
+
+  const handleNavClick = (itemId: string) => {
+      navigate(itemId);
+      if (itemId === 'chat') resetUnreadCount('chat');
+      if (itemId === 'group_chat') resetUnreadCount('group');
+      // For assignment hub or dashboard, we might clear alerts if needed, 
+      // but usually specific actions clear them (like clicking the bell).
+  };
 
   const menuItems = useMemo(() => {
     const common = [
       { id: 'dashboard', label: 'Trạm Vũ Trụ', icon: '🚀', action: 'hover_btn' },
-      { id: 'chat', label: 'Liên Lạc', icon: '📡', action: 'hover_chat' },
+      { id: 'chat', label: 'Liên Lạc', icon: '📡', action: 'hover_chat', badge: unreadCounts.chat },
     ];
     
     if (user?.role === 'STUDENT') {
@@ -175,7 +184,7 @@ const Navigation: React.FC = () => {
         ...common,
         { id: 'notebook', label: 'Sổ Tay', icon: '📓', action: 'hover_write' },
         { id: 'assignment_hub', label: 'Cây Tri Thức', icon: '🌳', action: 'hover_smart' },
-        { id: 'group_chat', label: 'Phi Đội', icon: '🛸', action: 'hover_btn' },
+        { id: 'group_chat', label: 'Phi Đội', icon: '🛸', action: 'hover_btn', badge: unreadCounts.group },
         { id: 'gemini_student', label: 'Nhà Tiên Tri', icon: '🔮', action: 'hover_magic' },
       ];
     } else if (user?.role === 'TEACHER') {
@@ -183,20 +192,20 @@ const Navigation: React.FC = () => {
         ...common,
         { id: 'notebook', label: 'Sổ Tay', icon: '📓', action: 'hover_write' },
         { id: 'assignment_hub', label: 'Quản lý Bài tập', icon: '📋', action: 'hover_smart' },
-        { id: 'group_chat', label: 'Quản lý Phi Đội', icon: '👁️', action: 'hover_detective' }, // Added for Teacher
+        { id: 'group_chat', label: 'Quản lý Phi Đội', icon: '👁️', action: 'hover_detective', badge: unreadCounts.group }, 
         { id: 'gemini_teacher', label: 'Trợ giảng AI', icon: '🤖', action: 'hover_magic' },
       ];
     } else if (user?.role === 'ADMIN') {
       return [
         ...common,
-        { id: 'admin_create_course', label: 'Khởi tạo Khóa học', icon: '🎓', action: 'hover_write' }, // REPLACED NOTEBOOK
+        { id: 'admin_create_course', label: 'Khởi tạo Khóa học', icon: '🎓', action: 'hover_write' }, 
         { id: 'admin_resilience', label: 'Resilience', icon: '🔧', action: 'hover_mechanic' },
         { id: 'deployment', label: 'Deployment', icon: '🚀', action: 'hover_btn' },
         { id: 'security', label: 'Security', icon: '🛡️', action: 'hover_scared' },
       ];
     }
     return common;
-  }, [user]);
+  }, [user, unreadCounts]);
 
   // Hide navigation in Deep Work Mode
   if (deepWorkMode) return null;
@@ -213,7 +222,7 @@ const Navigation: React.FC = () => {
         <button
           key={item.id}
           id={`nav-${item.id}`}
-          onClick={() => navigate(item.id)}
+          onClick={() => handleNavClick(item.id)}
           onMouseEnter={() => triggerReaction(item.action)}
           className={`flex flex-col items-center justify-center w-full md:h-20 p-2 gap-1 transition-all duration-300 relative group
             ${page === item.id 
@@ -224,9 +233,19 @@ const Navigation: React.FC = () => {
           {page === item.id && (
              <div className="absolute top-0 left-0 w-full h-0.5 md:w-0.5 md:h-full bg-blue-500 shadow-[0_0_10px_#3B82F6]"></div>
           )}
-          <span className={`text-2xl transition-transform duration-300 ${page === item.id ? 'scale-110 drop-shadow-[0_0_10px_rgba(59,130,246,0.8)]' : 'group-hover:scale-110'}`}>
-            {item.icon}
-          </span>
+          
+          <div className="relative">
+              <span className={`text-2xl transition-transform duration-300 ${page === item.id ? 'scale-110 drop-shadow-[0_0_10px_rgba(59,130,246,0.8)]' : 'group-hover:scale-110'}`}>
+                {item.icon}
+              </span>
+              {/* BADGE */}
+              {item.badge && item.badge > 0 && (
+                  <span className="absolute -top-2 -right-3 bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg border border-black animate-bounce">
+                      {item.badge > 99 ? '99+' : item.badge}
+                  </span>
+              )}
+          </div>
+
           <span className="text-[10px] font-bold uppercase tracking-wider opacity-80 hidden md:block text-center">{item.label}</span>
         </button>
       ))}
@@ -238,6 +257,7 @@ const Header: React.FC = () => {
   const { user, logout } = useContext(AuthContext)!;
   const { page, setPage, deepWorkMode } = useContext(GlobalStateContext)!;
   const { triggerReaction } = useContext(PetContext)!;
+  const { unreadCounts, resetUnreadCount } = useContext(DataContext)!;
 
   // Header can remain visible or simplify in deep work mode. Let's simplify.
   if (deepWorkMode) return null;
@@ -267,7 +287,12 @@ const Header: React.FC = () => {
         >
           🔑
         </button>
-        <div id="header-notif" className="pointer-events-auto" onMouseEnter={() => triggerReaction('hover_smart')}><NotificationBell /></div>
+        <div id="header-notif" className="pointer-events-auto relative" onMouseEnter={() => triggerReaction('hover_smart')} onClick={() => resetUnreadCount('alert')}>
+            <NotificationBell />
+            {unreadCounts.alert > 0 && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping pointer-events-none"></span>
+            )}
+        </div>
         <button 
             onClick={logout} 
             onMouseEnter={() => triggerReaction('sad')}

@@ -511,6 +511,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }
             } catch (e) { console.error("Quizzes fetch error", e); }
 
+            // 1d. Fetch Lessons (FIX: Ensure lessons are loaded from backend)
+            try {
+                const lessonsRes = await fetch(`${BACKEND_URL}/lessons`);
+                if (lessonsRes.ok) {
+                    const lessonsArr: Lesson[] = await lessonsRes.json();
+                    const lessonsMap: Record<string, Lesson> = {};
+                    lessonsArr.forEach(l => lessonsMap[l.id] = l);
+                    
+                    updateDb(prev => ({ 
+                        ...prev, 
+                        LESSONS: { ...prev.LESSONS, ...lessonsMap } 
+                    }));
+                }
+            } catch (e) { console.error("Lessons fetch error", e); }
+
             // 2. Fetch Learning Paths
             const pathsRes = await fetch(`${BACKEND_URL}/paths/${userId}`);
             if (pathsRes.ok) {

@@ -36,8 +36,12 @@ const SOUNDS = {
     level_up: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3',
     // Lỗi / Xóa (Thud)
     error: 'https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3',
-    // Click nhẹ (UI interaction - optional)
-    click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3' 
+    // Click UI (Mouse Interaction)
+    click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
+    // Tiếng gõ phím (Keyboard Typing)
+    keyboard: 'https://assets.mixkit.co/active_storage/sfx/236/236-preview.mp3', 
+    // Tiếng hover nhẹ hoặc tap vào phần tử nhỏ
+    tap: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'
 };
 
 type SoundType = keyof typeof SOUNDS;
@@ -220,10 +224,54 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const url = SOUNDS[type];
         if (!url) return;
         const audio = new Audio(url);
-        // Reduce volume for repetitive sounds
-        audio.volume = type === 'sent' || type === 'click' ? 0.3 : 0.5; 
-        audio.play().catch(e => console.log("Audio play blocked (user interaction needed)", e));
+        
+        // Volume Mix
+        if (type === 'keyboard') audio.volume = 0.15; // Subtle typing
+        else if (type === 'click') audio.volume = 0.2; // Gentle clicks
+        else if (type === 'tap') audio.volume = 0.1;
+        else if (type === 'sent') audio.volume = 0.3;
+        else audio.volume = 0.5; // Events are louder
+
+        audio.play().catch(e => {
+            // Ignore auto-play blocking errors for rapid interactions
+        });
     };
+
+    // --- GLOBAL SOUND LISTENERS ---
+    useEffect(() => {
+        const handleGlobalInteraction = (e: MouseEvent) => {
+            // Detect clicks on interactive elements
+            const target = e.target as HTMLElement;
+            // Identify clickable elements broadly
+            const isInteractive = target.closest('button, a, input, select, textarea, [role="button"], .btn, .card, .clickable');
+            
+            if (isInteractive) {
+                // Play 'click' sound for interactive elements
+                playSound('click');
+            } else {
+                // Optional: Play a very faint 'tap' for background clicks if desired, 
+                // but usually better to keep silence for void clicks to emphasize UI.
+                // playSound('tap'); 
+            }
+        };
+
+        const handleGlobalTyping = (e: KeyboardEvent) => {
+            // Filter out modifier keys held alone
+            if (['Control', 'Shift', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return;
+            
+            // Play typing sound for any character or navigation
+            playSound('keyboard');
+        };
+
+        // Use 'mousedown' for instant feedback before 'click' logic fires
+        window.addEventListener('mousedown', handleGlobalInteraction);
+        window.addEventListener('keydown', handleGlobalTyping);
+
+        return () => {
+            window.removeEventListener('mousedown', handleGlobalInteraction);
+            window.removeEventListener('keydown', handleGlobalTyping);
+        };
+    }, []);
 
     const playNotificationSound = () => {
         playSound('notification');

@@ -2,14 +2,15 @@
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import { AuthContext, DataContext, GlobalStateContext, PageContext, DataProvider, AuthProvider, GlobalStateProvider, PageProvider, MusicProvider, MusicContext, PetProvider, PetContext } from './contexts/AppProviders';
 import GlobalStyles from './components/common/GlobalStyles';
-import SkinEffectOverlay from './components/common/SkinEffectOverlay'; // NEW IMPORT
+import SkinEffectOverlay from './components/common/SkinEffectOverlay'; 
+import GlobalSoundManager from './components/common/GlobalSoundManager'; // NEW IMPORT
 import NotificationBell from './components/common/NotificationBell';
 import GeminiAPIKeyModal from './components/modals/GeminiAPIKeyModal';
 import OnboardingTour, { TourStep } from './components/common/OnboardingTour';
 import LockoutScreen from './components/auth/LockoutScreen';
 import AuthPage from './components/auth/AuthPage';
 import StudyBuddy from './components/common/StudyBuddy';
-import SpaceJunkScavenger from './components/common/SpaceJunkScavenger'; // NEW IMPORT
+import SpaceJunkScavenger from './components/common/SpaceJunkScavenger'; 
 
 import StudentDashboardPage, { MusicWidget, FocusTimerWidget } from './components/pages/StudentDashboardPage';
 import TeacherDashboardPage from './components/pages/TeacherDashboardPage';
@@ -457,6 +458,9 @@ const AppLayout: React.FC = () => {
 
        {/* LAYER -1: DYNAMIC PARTICLE SKIN OVERLAY */}
        <SkinEffectOverlay />
+
+       {/* SOUND MANAGER (INVISIBLE) */}
+       <GlobalSoundManager />
 
        {/* DEEP WORK OVERLAY - DARKNESS */}
        <div className={`fixed inset-0 bg-black/95 z-[90] transition-opacity duration-1000 pointer-events-none ${deepWorkMode ? 'opacity-100' : 'opacity-0'}`}></div>

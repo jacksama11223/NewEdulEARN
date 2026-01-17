@@ -62,19 +62,19 @@ const NotificationBell: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 card p-0 overflow-hidden z-20 shadow-xl bg-gray-900 border border-gray-700">
-          <div className="p-3 border-b border-gray-700">
+        <div className="absolute right-0 top-full mt-4 w-80 card p-0 overflow-hidden z-[100] shadow-[0_0_50px_rgba(0,0,0,0.5)] bg-gray-900 border border-gray-700">
+          <div className="p-3 border-b border-gray-700 bg-gray-800/50">
             <h3 className="font-semibold text-gray-200">Thông báo</h3>
           </div>
           {notifications.length === 0 ? (
             <p className="text-gray-400 text-sm p-4">Không có thông báo mới.</p>
           ) : (
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-80 overflow-y-auto custom-scrollbar">
               {notifications.map(n => (
                 <div 
                     key={n.id} 
                     onClick={() => handleNotificationClick(n)}
-                    className={`p-3 border-b border-gray-700 last:border-b-0 hover:bg-gray-800 cursor-pointer transition-colors ${!n.read ? 'bg-blue-900/10' : ''}`}
+                    className={`p-3 border-b border-gray-700 last:border-b-0 hover:bg-gray-800 cursor-pointer transition-colors ${!n.read ? 'bg-blue-900/20' : ''}`}
                 >
                   <div className="flex justify-between items-start">
                       <p className={`text-sm ${!n.read ? 'text-white font-semibold' : 'text-gray-400'}`}>{n.text}</p>

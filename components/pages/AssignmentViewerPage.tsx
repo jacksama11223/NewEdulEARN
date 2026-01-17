@@ -1,5 +1,4 @@
 
-
 import React, { useState, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
 import { AuthContext, DataContext, GlobalStateContext, PageContext, PetContext } from '../../contexts/AppProviders';
 import Modal from '../common/Modal';
@@ -473,15 +472,38 @@ const AssignmentViewerPage: React.FC<AssignmentViewerPageProps> = ({ assignmentI
                     {assignment.type === 'file' && fileSubmission && (
                         <div className="card p-6 space-y-4">
                             <h2 className="text-xl font-semibold text-gray-200">Nộp bài tập</h2>
-                            {fileSubmission.status === 'Đã nộp' ? (
-                                <div>
-                                    <p className="text-green-400 font-semibold">✅ Bạn đã nộp bài: <span className="font-mono bg-gray-700 px-1 rounded">{fileSubmission.fileName}</span></p>
-                                    {fileSubmission.grade != null ? (
-                                        <div className="mt-4 p-4 bg-gray-800 rounded-lg border border-gray-700">
-                                            <p className="text-lg font-semibold text-gray-200">Điểm số: <span className="text-blue-400">{fileSubmission.grade} / 10</span></p>
-                                            {fileSubmission.feedback && <p className="text-gray-300 mt-1"><span className="font-medium text-gray-400">Nhận xét:</span> {fileSubmission.feedback}</p>}
+                            {/* Updated Logic: Check for both Submitted and Graded status to show result view */}
+                            {fileSubmission.status !== 'Chưa nộp' ? (
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-gray-800 rounded-lg border border-gray-600">
+                                        <p className="text-green-400 font-semibold mb-2 flex items-center gap-2">
+                                            <span>✅</span> Đã nộp thành công
+                                        </p>
+                                        <p className="text-sm text-gray-300">File đã nộp: <span className="font-mono bg-black/30 px-2 py-1 rounded text-blue-300">{fileSubmission.fileName}</span></p>
+                                        <p className="text-xs text-gray-500 mt-1">Thời gian: {fileSubmission.timestamp ? new Date(fileSubmission.timestamp).toLocaleString() : 'N/A'}</p>
+                                    </div>
+
+                                    {/* Grade Display */}
+                                    {fileSubmission.grade !== null ? (
+                                        <div className="p-4 bg-blue-900/20 rounded-lg border border-blue-500/50 animate-fade-in-up">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <h3 className="text-blue-300 font-bold uppercase tracking-wider text-xs">Kết quả chấm điểm</h3>
+                                                <span className={`text-xl font-black ${fileSubmission.grade >= 5 ? 'text-green-400' : 'text-red-400'}`}>
+                                                    {fileSubmission.grade} / 10
+                                                </span>
+                                            </div>
+                                            {fileSubmission.feedback && (
+                                                <div className="bg-black/20 p-3 rounded border-l-2 border-blue-400">
+                                                    <p className="text-gray-300 text-sm italic">"{fileSubmission.feedback}"</p>
+                                                    <p className="text-xs text-gray-500 mt-1 text-right">- Giáo viên</p>
+                                                </div>
+                                            )}
                                         </div>
-                                    ) : <p className="text-yellow-400 mt-2">🕒 Chờ chấm điểm.</p>}
+                                    ) : (
+                                        <p className="text-yellow-400 text-sm italic flex items-center gap-2 bg-yellow-900/10 p-2 rounded border border-yellow-500/20">
+                                            <span>🕒</span> Đang chờ giáo viên chấm điểm...
+                                        </p>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-4">

@@ -13,9 +13,10 @@ import GroupMessage from '../models/GroupMessage.js';
 import LearningPath from '../models/LearningPath.js';
 import Quiz from '../models/Quiz.js';
 import QuizSubmission from '../models/QuizSubmission.js';
-import FileSubmission from '../models/FileSubmission.js'; // NEW IMPORT
+import FileSubmission from '../models/FileSubmission.js';
 import User from '../models/User.js';
 import FlashcardDeck from '../models/FlashcardDeck.js';
+import Notification from '../models/Notification.js'; // NEW IMPORT
 
 const router = express.Router();
 
@@ -206,6 +207,62 @@ router.post('/file-submissions', async (req, res) => {
             req.io.emit('db_update', { type: 'FILE_SUBMISSION', data: sub });
         }
         res.status(201).json(sub);
+    } catch (error) { res.status(400).json({ message: error.message }); }
+});
+
+// --- NOTIFICATIONS (NEW) ---
+
+router.get('/notifications/:userId', async (req, res) => {
+    try {
+        const notifs = await Notification.find({ userId: req.params.userId }).sort({ timestamp: -1 });
+        res.json(notifs);
+    } catch (error) { res.status(500).json({ message: error.message }); }
+});
+
+router.post('/notifications/intervention', async (req, res) => {
+    try {
+        const { assignmentId, questionId, note, studentIds } = req.body;
+        
+        const createdNotifications = [];
+
+        for (const studentId of studentIds) {
+            const notifData = {
+                id: `notif_int_${Date.now()}_${studentId}`,
+                userId: studentId,
+                text: `👨‍🏫 Giáo viên đã gửi lời giảng lại cho câu hỏi bạn làm sai.`,
+                type: 'intervention',
+                read: false,
+                metadata: {
+                    assignmentId,
+                    questionId,
+                    teacherNote: note
+                },
+                timestamp: new Date()
+            };
+
+            const notif = await Notification.create(notifData);
+            createdNotifications.push(notif);
+
+            // REALTIME EMIT
+            if (req.io) {
+                req.io.to(studentId).emit('receive_notification', notif);
+            }
+        }
+
+        res.status(201).json({ message: `Sent intervention to ${createdNotifications.length} students`, notifications: createdNotifications });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+router.put('/notifications/:id/read', async (req, res) => {
+    try {
+        const notif = await Notification.findOneAndUpdate(
+            { id: req.params.id },
+            { read: true },
+            { new: true }
+        );
+        res.json(notif);
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 

@@ -1,4 +1,5 @@
 
+
 export type UserRole = 'STUDENT' | 'TEACHER' | 'ADMIN';
 
 export interface User {
@@ -135,6 +136,7 @@ export interface Announcement {
 
 export interface Notification {
   id: string;
+  userId: string;
   text: string;
   read: boolean;
   type: string;

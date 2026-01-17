@@ -1,4 +1,5 @@
 
+
 import type { Database } from '../types';
 
 export const MOCK_DATA: Database = {
@@ -67,14 +68,14 @@ export const MOCK_DATA: Database = {
   },
   FILE_SUBMISSIONS: {
     "a001": [
-      { id: "sub_sv001_a001", studentId: "sv001", studentName: "Hoàng Đăng Quang", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
-      { id: "sub_sv002_a001", studentId: "sv002", studentName: "Lê Thị C", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
-      { id: "sub_sv003_a001", studentId: "sv003", studentName: "Phạm Văn D", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
+      { id: "sub_sv001_a001", assignmentId: "a001", studentId: "sv001", studentName: "Hoàng Đăng Quang", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
+      { id: "sub_sv002_a001", assignmentId: "a001", studentId: "sv002", studentName: "Lê Thị C", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
+      { id: "sub_sv003_a001", assignmentId: "a001", studentId: "sv003", studentName: "Phạm Văn D", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
     ],
     "a002": [
-      { id: "sub_sv001_a002", studentId: "sv001", studentName: "Hoàng Đăng Quang", status: "Đã nộp", grade: null, feedback: null, fileName: "thiet_ke_he_thong_v1.docx", timestamp: "2025-10-27T14:30:00Z" },
-      { id: "sub_sv002_a002", studentId: "sv002", studentName: "Lê Thị C", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
-      { id: "sub_sv003_a002", studentId: "sv003", studentName: "Phạm Văn D", status: "Đã nộp", grade: 8.5, feedback: "Làm tốt, cần chi tiết hơn ở phần 2.", fileName: "lms_report_final.docx", timestamp: "2025-10-28T09:15:00Z" },
+      { id: "sub_sv001_a002", assignmentId: "a002", studentId: "sv001", studentName: "Hoàng Đăng Quang", status: "Đã nộp", grade: null, feedback: null, fileName: "thiet_ke_he_thong_v1.docx", timestamp: "2025-10-27T14:30:00Z" },
+      { id: "sub_sv002_a002", assignmentId: "a002", studentId: "sv002", studentName: "Lê Thị C", status: "Chưa nộp", grade: null, feedback: null, fileName: null, timestamp: null },
+      { id: "sub_sv003_a002", assignmentId: "a002", studentId: "sv003", studentName: "Phạm Văn D", status: "Đã nộp", grade: 8.5, feedback: "Làm tốt, cần chi tiết hơn ở phần 2.", fileName: "lms_report_final.docx", timestamp: "2025-10-28T09:15:00Z" },
     ]
   },
   QUIZ_SUBMISSIONS: {

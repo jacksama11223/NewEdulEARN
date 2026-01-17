@@ -305,12 +305,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         // Generic Notifications
         newSocket.on('receive_notification', (notif: Notification) => {
-             if (userId) {
+             // If user is logged in, update their notification list
+             if (currentUserId) { // Use ref to avoid closure staleness if possible, or assume userId is stable
                  updateDb(prev => ({
                      ...prev,
                      NOTIFICATIONS: {
                          ...prev.NOTIFICATIONS,
-                         [userId]: [...(prev.NOTIFICATIONS[userId] || []), notif]
+                         [notif.userId]: [...(prev.NOTIFICATIONS[notif.userId] || []), notif]
                      }
                  }));
              }
@@ -679,8 +680,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     updateDb(prev => ({ ...prev, QUIZ_SUBMISSIONS: quizSubsMap }));
                 }
             } catch (e) { console.error("Quiz Submissions fetch error", e); }
+            
+            // 10. Fetch Notifications (NEW)
+            try {
+                const notifRes = await fetch(`${BACKEND_URL}/notifications/${userId}`);
+                if (notifRes.ok) {
+                    const notifs: Notification[] = await notifRes.json();
+                    updateDb(prev => ({
+                        ...prev,
+                        NOTIFICATIONS: { ...prev.NOTIFICATIONS, [userId]: notifs }
+                    }));
+                }
+            } catch (e) { console.error("Notifications fetch error", e); }
 
-            // 10. Update SRS counts immediately
+            // 11. Update SRS counts immediately
             fetchDueFlashcards(userId);
 
         } catch (e) {
@@ -958,7 +971,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const dismissAnnouncement = (id: string) => { /* Mock */ };
-    const markNotificationRead = (userId: string, notifId: string) => { /* Mock */ };
+    const markNotificationRead = async (userId: string, notifId: string) => {
+        updateDb(prev => ({
+            ...prev,
+            NOTIFICATIONS: {
+                ...prev.NOTIFICATIONS,
+                [userId]: (prev.NOTIFICATIONS[userId] || []).map(n => n.id === notifId ? { ...n, read: true } : n)
+            }
+        }));
+        // Update Backend
+        try {
+            await fetch(`${BACKEND_URL}/notifications/${notifId}/read`, { method: 'PUT' });
+        } catch(e) { console.error("Mark read failed", e); }
+    };
     
     const buyShopItem = (itemId: string) => {
         const item = db.SHOP_ITEMS.find(i => i.id === itemId);
@@ -1619,7 +1644,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch(e) { console.error("Create Boss Challenge API Failed", e); }
     };
 
-    const sendIntervention = (assignmentId: string, questionId: string, note: string, studentIds: string[]) => { /* Mock */ };
+    // --- UPDATED: sendIntervention Implementation ---
+    const sendIntervention = async (assignmentId: string, questionId: string, note: string, studentIds: string[]) => {
+        // Optimistic UI updates could go here if we had a view for 'Sent Interventions',
+        // but currently we rely on the backend to push notifications.
+
+        try {
+            await fetch(`${BACKEND_URL}/notifications/intervention`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assignmentId, questionId, note, studentIds })
+            });
+            // Success handled by caller
+        } catch (e) {
+            console.error("Failed to send intervention:", e);
+        }
+    };
     
     // --- UPDATED: Persist Course Creation to Backend ---
     const adminCreateCourse = async (name: string, teacherName: string, modules: GeneratedModule[], defaultPersona?: string, autoSeedApiKey?: string, isBeta?: boolean) => {
@@ -1769,7 +1809,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
 };
 
-// ... (Other providers: GlobalStateProvider, PageProvider, AuthProvider, MusicProvider, PetProvider)
+// ... (Rest of Providers)
 export const GlobalStateProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
         user_management: 'OPERATIONAL', course_management: 'OPERATIONAL', content_delivery: 'OPERATIONAL', assessment_taking: 'OPERATIONAL', storage_service: 'OPERATIONAL', grading_service: 'OPERATIONAL', notification_service: 'OPERATIONAL', chat_service: 'OPERATIONAL', group_service: 'OPERATIONAL', forum_service: 'OPERATIONAL', ai_tutor_service: 'OPERATIONAL', ai_assistant_service: 'OPERATIONAL', personalization: 'OPERATIONAL', analytics: 'OPERATIONAL'

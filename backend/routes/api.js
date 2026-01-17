@@ -210,6 +210,51 @@ router.post('/file-submissions', async (req, res) => {
     } catch (error) { res.status(400).json({ message: error.message }); }
 });
 
+// NEW: Grade File Submission (Persistence + Notification)
+router.put('/file-submissions/grade', async (req, res) => {
+    try {
+        const { assignmentId, studentId, grade, feedback } = req.body;
+        
+        // 1. Update the submission in DB
+        const submission = await FileSubmission.findOneAndUpdate(
+            { assignmentId, studentId },
+            { grade, feedback, status: 'Đã chấm' },
+            { new: true }
+        );
+
+        if (!submission) {
+            return res.status(404).json({ message: "Submission not found" });
+        }
+
+        // 2. Create Notification for the student
+        const assignment = await Assignment.findOne({ id: assignmentId });
+        const title = assignment ? assignment.title : 'Bài tập';
+        
+        const notification = await Notification.create({
+            id: `notif_grade_${Date.now()}`,
+            userId: studentId,
+            text: `📝 Bài tập "${title}" đã được chấm điểm: ${grade}/10`,
+            type: 'grade_update',
+            read: false,
+            metadata: { assignmentId, grade, feedback },
+            timestamp: new Date()
+        });
+
+        // 3. Emit Socket Events
+        if (req.io) {
+            // Update global state for everyone (teachers see updated list)
+            req.io.emit('db_update', { type: 'FILE_SUBMISSION', data: submission });
+            
+            // Send notification specifically to the student
+            req.io.to(studentId).emit('receive_notification', notification);
+        }
+
+        res.json(submission);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 // --- NOTIFICATIONS (NEW) ---
 
 router.get('/notifications/:userId', async (req, res) => {

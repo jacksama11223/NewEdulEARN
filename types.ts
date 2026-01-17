@@ -76,7 +76,7 @@ export interface FileSubmission {
   assignmentId: string;
   studentId: string;
   studentName: string;
-  status: 'Chưa nộp' | 'Đã nộp';
+  status: 'Chưa nộp' | 'Đã nộp' | 'Đã chấm';
   grade: number | null;
   feedback: string | null;
   fileName: string | null;

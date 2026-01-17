@@ -761,15 +761,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     };
 
-    const gradeFileSubmission = (assignmentId: string, studentId: string, grade: number, feedback: string) => {
+    const gradeFileSubmission = async (assignmentId: string, studentId: string, grade: number, feedback: string) => {
+        // Optimistic UI Update
         updateDb(prev => {
             const subs = prev.FILE_SUBMISSIONS[assignmentId] || [];
-            const updatedSubs = subs.map(sub => sub.studentId === studentId ? { ...sub, grade, feedback } : sub);
+            // Added 'as const' to status to fix TypeScript error
+            const updatedSubs = subs.map(sub => sub.studentId === studentId ? { ...sub, grade, feedback, status: 'Đã chấm' as const } : sub);
             return {
                 ...prev,
                 FILE_SUBMISSIONS: { ...prev.FILE_SUBMISSIONS, [assignmentId]: updatedSubs }
             };
         });
+
+        // Call Backend API
+        try {
+            await fetch(`${BACKEND_URL}/file-submissions/grade`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assignmentId, studentId, grade, feedback })
+            });
+        } catch (e) {
+            console.error("Grade submission failed:", e);
+        }
     };
 
     const submitQuiz = async (quizId: string, userId: string, answers: Record<string, number>) => {

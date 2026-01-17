@@ -1,4 +1,5 @@
 
+
 import React, { useState, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
 import { AuthContext, DataContext, GlobalStateContext, PageContext, PetContext } from '../../contexts/AppProviders';
 import Modal from '../common/Modal';
@@ -270,7 +271,7 @@ const AssignmentViewerPage: React.FC<AssignmentViewerPageProps> = ({ assignmentI
         if (asg.type === 'file') {
             const existingSub = db.FILE_SUBMISSIONS[asg.id]?.find(s => s.studentId === user.id);
             const sub: FileSubmission = existingSub || {
-                id: 'temp', studentId: user.id, studentName: user.name, status: "Chưa nộp",
+                id: 'temp', assignmentId: asg.id, studentId: user.id, studentName: user.name, status: "Chưa nộp",
                 grade: null, feedback: null, fileName: null, timestamp: null
             };
             return { assignment: asg, course: crs, fileSubmission: sub, quiz: null, quizSubmission: null };

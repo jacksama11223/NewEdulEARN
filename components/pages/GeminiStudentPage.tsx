@@ -1,4 +1,5 @@
 
+
 import React, { useState, useContext, useCallback, useEffect, useRef } from 'react';
 import { AuthContext, DataContext, GlobalStateContext, PageContext } from '../../contexts/AppProviders';
 import { callGeminiApi, generateImageWithGemini, convertContentToFlashcards, convertContentToQuiz, generateFlashcardsFromPdf } from '../../services/geminiService';
@@ -192,7 +193,7 @@ const GeminiStudentPage: React.FC = () => {
             const result = await generateFlashcardsFromPdf(apiKey, attachedFile.base64);
             
             if (result.cards && result.cards.length > 0) {
-                createFlashcardDeck(result.title, result.cards);
+                createFlashcardDeck(user!.id, result.title, result.cards);
                 alert(`✅ Đã tạo bộ thẻ "${result.title}" với ${result.cards.length} thuật ngữ!\nKiểm tra Assignment Hub để học ngay.`);
                 setAttachedFile(null); // Clear file after processing
                 setOrbState('speaking');
@@ -278,7 +279,7 @@ const GeminiStudentPage: React.FC = () => {
         try {
             const cards = await convertContentToFlashcards(apiKey, text, {});
             if (cards && cards.length > 0) {
-                createFlashcardDeck(`AI Generated Deck ${new Date().toLocaleTimeString()}`, cards);
+                createFlashcardDeck(user!.id, `AI Generated Deck ${new Date().toLocaleTimeString()}`, cards);
                 alert(`🃏 Đã thêm bộ thẻ "${cards.length} thuật ngữ" vào kho!`);
             } else {
                 alert("Không tìm thấy nội dung phù hợp.");

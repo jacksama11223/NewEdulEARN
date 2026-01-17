@@ -298,7 +298,7 @@ const GradebookPage: React.FC<GradebookPageProps> = ({ assignmentId }) => {
             .filter(u => isTeacher ? true : u.id === user.id);
         
         return students.map(student => {
-            let submissionStatus: 'Chưa nộp' | 'Đã nộp' = 'Chưa nộp';
+            let submissionStatus: 'Chưa nộp' | 'Đã nộp' | 'Đã chấm' = 'Chưa nộp';
             let submittedAt = null;
             let scoreDisplay: React.ReactNode = '-';
             let detailDisplay: React.ReactNode = '-';
@@ -524,7 +524,7 @@ const GradebookPage: React.FC<GradebookPageProps> = ({ assignmentId }) => {
                                             </div>
                                         </td>
                                         <td className="p-4 text-center">
-                                            <span className={`px-2 py-1 text-[10px] font-bold rounded-full uppercase border ${submissionStatus === 'Đã nộp' ? 'bg-green-900/20 text-green-400 border-green-500/30' : 'bg-red-900/20 text-red-400 border-red-500/30'}`}>{submissionStatus}</span>
+                                            <span className={`px-2 py-1 text-[10px] font-bold rounded-full uppercase border ${submissionStatus === 'Đã nộp' || submissionStatus === 'Đã chấm' ? 'bg-green-900/20 text-green-400 border-green-500/30' : 'bg-red-900/20 text-red-400 border-red-500/30'}`}>{submissionStatus}</span>
                                         </td>
                                         <td className="p-4 text-center text-sm">{scoreDisplay}</td>
                                         <td className="p-4 text-center text-sm">{detailDisplay}</td>

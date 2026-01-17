@@ -227,7 +227,8 @@ const AssignmentHubPage: React.FC = () => {
                 let isDone = false;
                 if (asg.type === 'file') {
                     sub = db.FILE_SUBMISSIONS[asg.id]?.find(s => s.studentId === user.id);
-                    isDone = sub && sub.status === 'Đã nộp';
+                    // UPDATED LOGIC: Anything that is NOT 'Chưa nộp' is considered done (Submitted or Graded)
+                    isDone = sub && sub.status !== 'Chưa nộp';
                 } else if (asg.type === 'quiz' && asg.quizId) {
                     sub = db.QUIZ_SUBMISSIONS[asg.quizId]?.[user.id];
                     isDone = !!sub;
